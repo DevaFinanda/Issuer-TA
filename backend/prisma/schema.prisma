@@ -1,0 +1,148 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String     @id @default(uuid())
+  username      String     @unique
+  email         String     @unique
+  passwordHash  String
+  fullName      String
+  role          UserRole   @default(ADMIN)
+  isActive      Boolean    @default(true)
+  lastLoginAt   DateTime?
+  loginAttempts Int        @default(0)
+  lockedUntil   DateTime?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  auditLogs     AuditLog[]
+
+  @@index([username])
+  @@index([email])
+  @@index([isActive])
+  @@map("users")
+}
+
+model Credential {
+  id            String           @id @default(uuid())
+  sdJwt         String
+  holderDID     String
+  holderName    String
+  documentId    String
+  documentHash  String
+  documentType  String           @default("BPJS_DOCUMENT")
+  noBPJS        String
+  nik           String
+  tanggalLahir  String?
+  alamat        String?
+  metadata      Json?
+  issuerDID     String
+  issuerName    String           @default("BPJS Kesehatan")
+  issuedAt      DateTime         @default(now())
+  validFrom     DateTime         @default(now())
+  validUntil    DateTime
+  status        CredentialStatus @default(ACTIVE)
+  revokedAt     DateTime?
+  revokedReason String?
+
+  @@index([holderDID])
+  @@index([noBPJS])
+  @@index([nik])
+  @@index([documentId])
+  @@index([status])
+  @@index([issuedAt])
+  @@map("credentials")
+}
+
+model RevocationList {
+  id           String   @id @default(uuid())
+  credentialId String   @unique
+  revokedAt    DateTime @default(now())
+  reason       String?
+  revokedBy    String?
+
+  @@index([credentialId])
+  @@map("revocation_list")
+}
+
+model AuditLog {
+  id         String      @id @default(uuid())
+  action     AuditAction
+  entityType String
+  entityId   String?
+  actorType  String
+  actorId    String?
+  details    Json?
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime    @default(now())
+  userId     String?
+  user       User?       @relation(fields: [userId], references: [id])
+
+  @@index([action])
+  @@index([entityType])
+  @@index([createdAt])
+  @@index([userId])
+  @@map("audit_logs")
+}
+
+model ApiKey {
+  id          String    @id @default(uuid())
+  name        String
+  keyHash     String    @unique
+  permissions String[]  @default(["read"])
+  isActive    Boolean   @default(true)
+  lastUsedAt  DateTime?
+  usageCount  Int       @default(0)
+  createdAt   DateTime  @default(now())
+  expiresAt   DateTime?
+
+  @@index([keyHash])
+  @@index([isActive])
+  @@map("api_keys")
+}
+
+model IssuerConfig {
+  id          String   @id @default(uuid())
+  key         String   @unique
+  value       String
+  description String?
+  updatedAt   DateTime @updatedAt
+
+  @@map("issuer_config")
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  ADMIN
+  OPERATOR
+}
+
+enum CredentialStatus {
+  ACTIVE
+  REVOKED
+  EXPIRED
+  SUSPENDED
+}
+
+enum AuditAction {
+  CREDENTIAL_ISSUED
+  CREDENTIAL_RETRIEVED
+  CREDENTIAL_REVOKED
+  CREDENTIAL_VERIFIED
+  API_KEY_CREATED
+  API_KEY_REVOKED
+  CONFIG_UPDATED
+  SYSTEM_ERROR
+  USER_REGISTERED
+  USER_LOGIN
+  USER_LOGOUT
+  USER_LOGIN_FAILED
+  USER_UPDATED
+  USER_DELETED
+}

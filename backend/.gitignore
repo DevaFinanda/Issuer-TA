@@ -1,0 +1,10 @@
+node_modules/
+dist/
+*.log
+.env
+.env.local
+.env.vps
+.env.production
+public/.well-known/did.json
+
+/src/generated/prisma
