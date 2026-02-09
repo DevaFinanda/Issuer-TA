@@ -250,6 +250,32 @@ export async function getAllCredentials(
 }
 
 /**
+ * Get all credentials from database (for API endpoint)
+ * Returns all active credentials to verify persistence
+ */
+export async function getAllCredentialsFromDB() {
+  return prisma.credential.findMany({
+    where: {
+      status: CredentialStatus.ACTIVE,
+    },
+    orderBy: { issuedAt: 'desc' },
+    select: {
+      id: true,
+      holderName: true,
+      holderDID: true,
+      documentId: true,
+      documentType: true,
+      noBPJS: true,
+      nik: true,
+      status: true,
+      issuedAt: true,
+      validUntil: true,
+      metadata: true,
+    },
+  })
+}
+
+/**
  * Search credentials
  */
 export async function searchCredentials(query: string) {

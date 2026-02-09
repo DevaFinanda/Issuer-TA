@@ -92,17 +92,22 @@ app.get('/api/stats', requireApiKey, async (req, res) => {
 // Protected endpoints dengan validasi
 app.post('/api/issue', requireApiKey, validateCredentialInput, IssuerController.issueCredential)
 app.get('/api/credential/:id', validateCredentialId, IssuerController.getCredentialById)
+app.get('/api/credentials', requireApiKey, IssuerController.getAllCredentials)
 
 // Initialize and start server
 async function startServer() {
-  // Check database connection
+  // Check database connection - REQUIRED for persistence
   const dbConnected = await checkDatabaseConnection()
-  setUseDatabaseStorage(dbConnected)
   
   if (!dbConnected) {
-    console.warn('⚠️  Running in fallback mode (in-memory storage)')
-    console.warn('⚠️  Data will be lost on server restart!')
+    console.error('❌ Database connection REQUIRED for data persistence!')
+    console.error('❌ Cannot start server without database connection.')
+    console.error('❌ Please check DATABASE_URL and ensure PostgreSQL is running.')
+    process.exit(1) // Exit if no database - NO FALLBACK MODE
   }
+  
+  setUseDatabaseStorage(true)
+  console.log('✅ Database storage ENABLED - All data will persist permanently')
   
   // Setup periodic cleanup (every hour)
   setInterval(async () => {

@@ -1,0 +1,15 @@
+{
+  "name": "issuer-ta",
+  "version": "1.0.0",
+  "description": "SD-JWT Credential Issuer Application",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently \"npm run backend:dev\" \"npm run frontend:dev\"",
+    "backend:dev": "cd backend && pnpm dev",
+    "frontend:dev": "cd frontend && pnpm dev",
+    "install:all": "cd backend && pnpm install && cd ../frontend && pnpm install"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}

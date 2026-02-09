@@ -110,41 +110,26 @@ export class IssuerController {
       const issuedAt = now.toISOString()
       const expiresAt = expiryDate.toISOString()
 
-      // Store credential in database
-      let credentialId: string
-      try {
-        credentialId = await storeCredentialDB({
-          sdJwt,
-          holderDID,
-          holderName,
-          documentId,
-          documentHash,
-          documentType,
-          noBPJS,
-          nik,
-          tanggalLahir,
-          alamat,
-          metadata,
-          issuerDID,
-          issuerName: process.env.ISSUER_NAME || 'BPJS Kesehatan',
-          validUntil: expiryDate,
-        })
-        console.log('💾 Credential stored in database with ID:', credentialId)
-      } catch (dbError) {
-        // Fallback to in-memory if database fails
-        console.warn('⚠️ Database store failed, using in-memory fallback')
-        credentialId = crypto.randomBytes(16).toString('hex')
-        storeCredential({
-          id: credentialId,
-          sdJwt,
-          credentialData: {
-            selectiveClaims: prettyClaims,
-          },
-          issuedAt,
-          expiresAt,
-        })
-        console.log('💾 Credential backed up in-memory with ID:', credentialId)
-      }
+      // Store credential in database - NO FALLBACK, database required
+      const credentialId = await storeCredentialDB({
+        sdJwt,
+        holderDID,
+        holderName,
+        documentId,
+        documentHash,
+        documentType,
+        noBPJS,
+        nik,
+        tanggalLahir,
+        alamat,
+        metadata,
+        issuerDID,
+        issuerName: process.env.ISSUER_NAME || 'BPJS Kesehatan',
+        validUntil: expiryDate,
+      })
+      
+      console.log('💾 Credential PERMANENTLY stored in database with ID:', credentialId)
+      console.log('✅ Data will persist across server restarts and page refreshes')
 
       // Generate QR Code berisi SD-JWT credential lengkap
       // Format: jwt~disclosure1~disclosure2~...~
@@ -212,7 +197,7 @@ export class IssuerController {
       const { id } = req.params
       console.log('📥 Fetching credential:', id)
 
-      // Try async fetch (database first, then in-memory fallback)
+      // Fetch from database only (no fallback)
       const stored = await getCredentialAsync(id)
 
       if (!stored) {
@@ -222,7 +207,7 @@ export class IssuerController {
         })
       }
 
-      console.log('✅ Credential retrieved')
+      console.log('✅ Credential retrieved from database')
 
       res.json({
         success: true,
@@ -236,6 +221,34 @@ export class IssuerController {
       res.status(500).json({
         success: false,
         error: 'Failed to retrieve credential',
+        message: error.message,
+      })
+    }
+  }
+
+  /**
+   * Get all credentials (for dashboard)
+   */
+  static async getAllCredentials(req: Request, res: Response) {
+    try {
+      console.log('📥 Fetching all credentials from database')
+      
+      // Import service function
+      const { getAllCredentialsFromDB } = await import('../services/credential.service.js')
+      const credentials = await getAllCredentialsFromDB()
+
+      console.log(`✅ Retrieved ${credentials.length} credentials from database`)
+
+      res.json({
+        success: true,
+        count: credentials.length,
+        credentials: credentials,
+      })
+    } catch (error: any) {
+      console.error('❌ Error:', error)
+      res.status(500).json({
+        success: false,
+        error: 'Failed to retrieve credentials',
         message: error.message,
       })
     }

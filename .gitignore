@@ -47,3 +47,9 @@ prisma/dev.db
 # Temp files
 *.tmp
 .cache/
+
+# Docker
+.env
+!.env.docker
+docker-compose.override.yml
+
