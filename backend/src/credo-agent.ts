@@ -340,16 +340,25 @@ export async function initializeCredoAgent(app: Express): Promise<void> {
   }
 
   // ============================================
-  // Create DID:key from the signing key
+  // Reuse existing DID:key or create a new one.
+  // `dids.create()` throws if the same DID already exists in Askar.
+  // Catch that error and fall back to the stored DID instead.
   // ============================================
-  const didCreateResult = await agent.dids.create({
-    method: 'key',
-    options: { keyId },
-  })
-
-  const did = didCreateResult.didState.did
-  if (!did) {
-    throw new Error('Failed to create DID:key — no DID returned')
+  let did: string
+  try {
+    const didCreateResult = await agent.dids.create({
+      method: 'key',
+      options: { keyId },
+    })
+    did = didCreateResult.didState.did!
+    if (!did) throw new Error('Failed to create DID:key — no DID returned')
+    console.log(`🔑 New DID created: ${did}`)
+  } catch (e: any) {
+    // DID likely already exists in Askar from a previous startup
+    const existingDids = await agent.dids.getCreatedDids({ method: 'key' })
+    if (existingDids.length === 0) throw e  // real error
+    did = existingDids[0].did
+    console.log(`♻️  Reusing existing DID: ${did}`)
   }
 
   agentDidKey = DidKeyClass.fromDid(did)
@@ -359,20 +368,29 @@ export async function initializeCredoAgent(app: Express): Promise<void> {
   console.log(`🔑 Key ID: ${kid}`)
 
   // ============================================
-  // Create OpenID4VCI Issuer record
+  // Reuse existing OpenID4VCI Issuer record or create a new one.
+  // Without this, every restart generates a new issuer UUID which
+  // changes the credential offer URL and well-known metadata URL.
   // ============================================
   const issuerApi = agent.openid4vc!.issuer!
+  const existingIssuers = await issuerApi.getAllIssuers()
 
-  issuerRecord = await issuerApi.createIssuer({
-    credentialConfigurationsSupported,
-    display: [
-      {
-        name: process.env.ISSUER_NAME || 'BPJS Kesehatan',
-        description: 'Digital Credential Issuer — BPJS Healthcare Archive System',
-        locale: 'id-ID',
-      },
-    ],
-  })
+  if (existingIssuers.length > 0) {
+    issuerRecord = existingIssuers[0]
+    console.log(`♻️  Reusing existing issuer record: ${issuerRecord.issuerId}`)
+  } else {
+    issuerRecord = await issuerApi.createIssuer({
+      credentialConfigurationsSupported,
+      display: [
+        {
+          name: process.env.ISSUER_NAME || 'BPJS Kesehatan',
+          description: 'Digital Credential Issuer — BPJS Healthcare Archive System',
+          locale: 'id-ID',
+        },
+      ],
+    })
+    console.log(`🆕 New issuer record created: ${issuerRecord.issuerId}`)
+  }
 
   const issuerMetadata = await issuerApi.getIssuerMetadata(
     issuerRecord.issuerId

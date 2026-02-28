@@ -26,6 +26,10 @@ const __dirname = path.dirname(__filename)
 const app = express()
 const PORT = Number(process.env.PORT) || 3000
 
+// Trust the first hop proxy (Nginx) so req.ip returns the real client IP
+// from X-Forwarded-For, not 127.0.0.1
+app.set('trust proxy', 1)
+
 // Security Middleware (harus di paling atas)
 app.use(securityHeaders)
 app.use(rateLimiter)
