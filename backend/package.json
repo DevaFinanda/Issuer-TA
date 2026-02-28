@@ -1,7 +1,7 @@
 {
-  "name": "issuer-bpjs-stable",
-  "version": "1.0.0",
-  "description": "BPJS Archive Issuer - Stable Implementation with did-jwt",
+  "name": "issuer-bpjs-oid4vci",
+  "version": "2.0.0",
+  "description": "BPJS Archive Issuer - OpenID4VCI Compliant with Credo Standard",
   "main": "dist/server.js",
   "type": "module",
   "scripts": {

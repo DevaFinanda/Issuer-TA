@@ -104,6 +104,7 @@ export default function CredentialIssuerForm() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [submitMessage, setSubmitMessage] = useState("")
   const [qrCode, setQrCode] = useState<string>("")
+  const [credentialOfferUri, setCredentialOfferUri] = useState<string>("")
   const [errorDetails, setErrorDetails] = useState<string>("")
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
@@ -211,7 +212,8 @@ export default function CredentialIssuerForm() {
 
       const response = await issuerApi.verifyDocument(requestData)
       setQrCode(response.qrCode)
-      setSubmitMessage("Credential berhasil diterbitkan!")
+      setCredentialOfferUri(response.credentialOfferUri || '')
+      setSubmitMessage("Credential offer berhasil dibuat! Scan QR code dengan wallet holder.")
 
       // Save to localStorage for dashboard
       const adminName = localStorage.getItem("admin_name") || "Admin"
@@ -321,27 +323,67 @@ export default function CredentialIssuerForm() {
         </form>
       </Card>
 
-      {/* QR Code Display Section */}
+      {/* QR Code Display Section - OpenID4VCI Credential Offer */}
       {qrCode && (
         <Card className="mt-6 p-8 shadow-2xl border border-primary/10">
           <div className="space-y-6">
             <div className="text-center">
               <h2 className="text-2xl font-bold text-primary mb-2">
+                Credential Offer
               </h2>
               <p className="text-muted-foreground text-sm">
-                Scan QR Code Anda
+                Scan QR Code dengan wallet holder untuk menerima credential
               </p>
+              <div className="mt-2 inline-flex items-center gap-2 px-3 py-1 bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 rounded-full text-xs font-medium">
+                <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+                OpenID4VCI Protocol
+              </div>
             </div>
             
             <div className="flex justify-center">
               <div className="p-6 bg-secondary/30 rounded-lg border-2 border-primary/20 inline-block">
                 <img 
                   src={qrCode} 
-                  alt="SD-JWT Verifiable Credential QR Code" 
+                  alt="OpenID4VCI Credential Offer QR Code" 
                   className="w-80 h-80 rounded"
                 />
               </div>
             </div>
+
+            {/* Credential Offer URI display */}
+            {credentialOfferUri && (
+              <div className="space-y-3">
+                <div className="text-center">
+                  <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">
+                    Credential Offer URI
+                  </p>
+                </div>
+                <div className="bg-muted/50 rounded-lg p-3 border">
+                  <code className="text-xs break-all text-muted-foreground leading-relaxed block max-h-24 overflow-y-auto">
+                    {credentialOfferUri}
+                  </code>
+                </div>
+                <div className="flex justify-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(credentialOfferUri)
+                      alert('Credential offer URI disalin!')
+                    }}
+                    className="text-xs px-4 py-2 bg-primary/10 hover:bg-primary/20 text-primary rounded-md transition-colors"
+                  >
+                    Salin URI
+                  </button>
+                </div>
+                <div className="text-center">
+                  <p className="text-xs text-muted-foreground">
+                    QR code berisi credential offer URI (bukan raw JWT).
+                    <br />
+                    Holder wallet akan resolve URI ini untuk menerima credential melalui protokol OpenID4VCI.
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
         </Card>
       )}

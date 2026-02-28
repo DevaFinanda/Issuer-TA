@@ -32,9 +32,9 @@ apiClient.interceptors.response.use(
     if (error.response?.status === 429) {
       console.error('⚠️ Rate limit exceeded');
     } else if (error.response?.status === 403) {
-      console.error('🚫 Access denied');
+      console.error('🚫 Access denied - Periksa API Key');
     } else if (error.code === 'ERR_NETWORK') {
-      console.error('❌ Network Error - Backend mungkin tidak berjalan di:', API_BASE_URL);
+      console.error(`❌ Network Error - Backend tidak dapat dijangkau di: ${API_BASE_URL}. Pastikan backend sudah berjalan.`);
     }
     return Promise.reject(error);
   }
@@ -57,15 +57,19 @@ export interface IssueCredentialRequest {
 export interface VerifyDocumentResponse {
   success: boolean;
   message: string;
-  requestId: string;
+  credentialId: string;
   qrCode: string;
-  requestData: any;
+  credentialOfferUri: string;
+  issuanceSessionId: string;
+  credentialData: any;
 }
 
 export interface IssueCredentialResponse {
   success: boolean;
   credential: any;
   message: string;
+  credentialOfferUri: string;
+  issuanceSessionId: string;
   issuedAt: string;
 }
 

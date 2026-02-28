@@ -29,26 +29,29 @@ model User {
 }
 
 model Credential {
-  id            String           @id @default(uuid())
-  sdJwt         String
-  holderDID     String
-  holderName    String
-  documentId    String
-  documentHash  String
-  documentType  String           @default("BPJS_DOCUMENT")
-  noBPJS        String
-  nik           String
-  tanggalLahir  String?
-  alamat        String?
-  metadata      Json?
-  issuerDID     String
-  issuerName    String           @default("BPJS Kesehatan")
-  issuedAt      DateTime         @default(now())
-  validFrom     DateTime         @default(now())
-  validUntil    DateTime
-  status        CredentialStatus @default(ACTIVE)
-  revokedAt     DateTime?
-  revokedReason String?
+  id                  String           @id @default(uuid())
+  sdJwt               String?          // Filled when holder claims via OID4VCI (null during offer stage)
+  credentialOfferUri  String?          // OpenID4VCI credential offer URI
+  issuanceSessionId   String?          // Credo agent issuance session ID
+  holderDID           String
+  holderName          String
+  documentId          String
+  documentHash        String
+  documentType        String           @default("BPJS_DOCUMENT")
+  noBPJS              String
+  nik                 String
+  tanggalLahir        String?
+  alamat              String?
+  metadata            Json?
+  issuerDID           String
+  issuerName          String           @default("BPJS Kesehatan")
+  issuedAt            DateTime         @default(now())
+  validFrom           DateTime         @default(now())
+  validUntil          DateTime
+  status              CredentialStatus @default(OFFERED)
+  claimedAt           DateTime?        // When holder successfully received the credential
+  revokedAt           DateTime?
+  revokedReason       String?
 
   @@index([holderDID])
   @@index([noBPJS])
@@ -56,6 +59,7 @@ model Credential {
   @@index([documentId])
   @@index([status])
   @@index([issuedAt])
+  @@index([issuanceSessionId])
   @@map("credentials")
 }
 
@@ -124,7 +128,9 @@ enum UserRole {
 }
 
 enum CredentialStatus {
-  ACTIVE
+  OFFERED     // Credential offer created, waiting for holder to claim
+  CLAIMED     // Holder has received the credential via OID4VCI
+  ACTIVE      // Credential is active (alias for claimed, kept for backward compat)
   REVOKED
   EXPIRED
   SUSPENDED

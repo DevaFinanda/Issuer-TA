@@ -1,4 +1,9 @@
 ignoredBuiltDependencies:
+  - '@2060.io/ffi-napi'
+  - '@2060.io/ref-napi'
+  - '@hyperledger/aries-askar-nodejs'
+  - '@sphereon/pex'
+  - es5-ext
   - esbuild
   - prisma
 

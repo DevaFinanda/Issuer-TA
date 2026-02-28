@@ -1,11 +1,12 @@
 import { Request, Response } from 'express'
-import { createSigner, getIssuerDID, getPrivateKey, resolver } from '../agent.js'
-import * as didJWT from 'did-jwt'
-import { createVerifiableCredentialJwt } from 'did-jwt-vc'
 import QRCode from 'qrcode'
-import { createSelectiveDisclosureJWT, parseSDJWT } from '../utils/sd-jwt.utils.js'
-import { storeCredential, getCredentialAsync } from '../utils/credential-store.js'
 import { storeCredentialDB } from '../services/credential.service.js'
+import {
+  createCredentialOffer,
+  getIssuerDID,
+  isAgentReady,
+} from '../credo-agent.js'
+import { getCredentialAsync } from '../utils/credential-store.js'
 import * as crypto from 'crypto'
 
 interface IssueCredentialRequest {
@@ -23,7 +24,17 @@ interface IssueCredentialRequest {
 
 export class IssuerController {
   /**
-   * Issue Verifiable Credential (W3C + JWT)
+   * Issue Verifiable Credential via OpenID4VCI Protocol
+   * 
+   * Creates a credential offer (not the credential itself).
+   * The actual SD-JWT VC is created on-demand when the holder resolves
+   * the offer and requests the credential through the OID4VCI protocol.
+   * 
+   * Flow:
+   * 1. Admin submits form data → this endpoint
+   * 2. Credo agent creates a credential offer URI
+   * 3. QR code encodes the credential offer URI (short, ~100-300 chars)
+   * 4. Holder scans QR → resolves offer → receives SD-JWT VC
    */
   static async issueCredential(req: Request, res: Response) {
     try {
@@ -50,69 +61,42 @@ export class IssuerController {
         })
       }
 
-      const issuerDID = getIssuerDID()
-      const privateKey = getPrivateKey()
-      const signer = createSigner(privateKey)
-
-      // Create W3C VC 2.0 Compliant Verifiable Credential payload
-      const now = new Date()
-      const expiryDate = new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000) // 1 year
-      
-      const vcPayload = {
-        sub: holderDID,
-        vc: {
-          '@context': [
-            'https://www.w3.org/ns/credentials/v2',
-            'https://www.w3.org/2018/credentials/v1',
-            'https://www.w3.org/2018/credentials/examples/v1',
-          ],
-          type: ['VerifiableCredential', 'BPJSDocumentCredential'],
-          id: `urn:uuid:${crypto.randomBytes(16).toString('hex')}`,
-          issuer: {
-            id: issuerDID,
-            name: process.env.ISSUER_NAME || 'BPJS Kesehatan',
-          },
-          issuanceDate: now.toISOString(),
-          validFrom: now.toISOString(),
-          validUntil: expiryDate.toISOString(),
-          credentialSubject: {
-            id: holderDID,
-            type: 'BPJSMember',
-            holderName,
-            noBPJS,
-            nik,
-            tanggalLahir,
-            alamat,
-            document: {
-              documentId,
-              documentHash,
-              documentType,
-            },
-            metadata: metadata || {},
-          },
-        },
+      // Check if Credo agent is ready
+      if (!isAgentReady()) {
+        return res.status(503).json({
+          success: false,
+          error: 'Credential agent is not initialized. Please wait and try again.',
+        })
       }
 
-      // Create SD-JWT with selective disclosure for privacy
-      console.log('🔐 Creating SD-JWT with selective disclosure...')
-      const { sdJwt, disclosures, prettyClaims } = await createSelectiveDisclosureJWT(
-        vcPayload,
-        privateKey,
-        issuerDID
-      )
+      const issuerDID = getIssuerDID()
+      const now = new Date()
+      const expiryDate = new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000) // 1 year
 
-      const parsed = parseSDJWT(sdJwt)
+      // ============================================
+      // Step 1: Create Credential Offer via OID4VCI
+      // ============================================
+      console.log('📋 Creating OpenID4VCI credential offer...')
       
-      console.log('✅ SD-JWT created with', disclosures.length, 'selective disclosures')
-      console.log('🔒 Selectively disclosable fields:', Object.keys(prettyClaims))
+      const { credentialOfferUri, issuanceSessionId } = await createCredentialOffer({
+        holderDID,
+        holderName,
+        noBPJS,
+        nik,
+        tanggalLahir,
+        alamat,
+        documentId,
+        documentHash,
+        documentType,
+        additionalMetadata: metadata,
+      })
 
-      // Use expiryDate from above
-      const issuedAt = now.toISOString()
-      const expiresAt = expiryDate.toISOString()
-
-      // Store credential in database - NO FALLBACK, database required
+      // ============================================
+      // Step 2: Store credential record in database
+      // ============================================
       const credentialId = await storeCredentialDB({
-        sdJwt,
+        credentialOfferUri,
+        issuanceSessionId,
         holderDID,
         holderName,
         documentId,
@@ -127,63 +111,75 @@ export class IssuerController {
         issuerName: process.env.ISSUER_NAME || 'BPJS Kesehatan',
         validUntil: expiryDate,
       })
-      
-      console.log('💾 Credential PERMANENTLY stored in database with ID:', credentialId)
-      console.log('✅ Data will persist across server restarts and page refreshes')
 
-      // Generate QR Code berisi SD-JWT credential lengkap
-      // Format: jwt~disclosure1~disclosure2~...~
-      // Holder wallet akan scan dan parse SD-JWT ini untuk disimpan
-      const qrCode = await QRCode.toDataURL(sdJwt, {
-        errorCorrectionLevel: 'L', // Low correction = more data capacity
+      console.log('💾 Credential offer stored in database with ID:', credentialId)
+
+      // ============================================
+      // Step 3: Generate QR Code with Credential Offer URI
+      // ============================================
+      // The QR code now contains a SHORT credential offer URI
+      // instead of the entire SD-JWT (which was 2KB+)
+      // This is compliant with OpenID4VCI specification
+      const qrCode = await QRCode.toDataURL(credentialOfferUri, {
+        errorCorrectionLevel: 'M', // Medium correction (offer URI is short)
         width: 512,
-        margin: 1,
-        scale: 4,
-        type: 'image/png'
+        margin: 2,
+        type: 'image/png',
       })
 
-      console.log('✅ SD-JWT Credential issued successfully')
-      console.log('📦 QR Code contains SD-JWT with EdDSA signature')
-      console.log('📏 SD-JWT size:', sdJwt.length, 'characters')
-      console.log('🔐 Selective disclosure fields:', Object.keys(prettyClaims))
-      console.log('🔗 Credential URL: /api/credential/' + credentialId)
+      console.log('✅ Credential offer created successfully (OpenID4VCI)')
+      console.log('📦 QR Code contains credential offer URI (not raw JWT)')
+      console.log('📏 Offer URI length:', credentialOfferUri.length, 'characters')
+      console.log('🔗 Credential ID:', credentialId)
+      console.log('📝 Issuance Session:', issuanceSessionId)
 
       res.json({
         success: true,
-        message: 'W3C Verifiable Credential issued successfully',
+        message: 'Credential offer created successfully (OpenID4VCI)',
         qrCode,
         credentialId,
-        credential: sdJwt,
+        credentialOfferUri,
+        issuanceSessionId,
         credentialData: {
           '@context': 'https://www.w3.org/2018/credentials/v1',
           type: ['VerifiableCredential', 'BPJSHealthCredential'],
           format: 'vc+sd-jwt',
+          protocol: 'OpenID4VCI (Pre-Authorized Code Flow)',
           algorithm: 'EdDSA (Ed25519)',
           issuer: {
-            id: getIssuerDID(),
-            name: process.env.ISSUER_NAME || 'BPJS Kesehatan'
+            id: issuerDID,
+            name: process.env.ISSUER_NAME || 'BPJS Kesehatan',
           },
-          hashAlgorithm: 'SHA-256',
           selectiveDisclosure: {
             enabled: true,
-            fields: Object.keys(prettyClaims),
-            disclosureCount: parsed.disclosures.length,
-            mechanism: 'hash-based'
+            fields: ['holderName', 'noBPJS', 'nik', 'tanggalLahir', 'alamat'],
+            mechanism: 'SD-JWT (hash-based)',
           },
           proof: {
             type: 'Ed25519Signature2020',
-            created: new Date().toISOString(),
-            verificationMethod: getIssuerDID() + '#key-1',
-            proofPurpose: 'assertionMethod'
+            created: now.toISOString(),
+            verificationMethod: issuerDID + '#key-1',
+            proofPurpose: 'assertionMethod',
           },
-          selectiveClaims: prettyClaims,
+          holderInfo: {
+            holderName,
+            noBPJS,
+            documentType,
+          },
+          offerInfo: {
+            credentialOfferUri,
+            issuanceSessionId,
+            expiresAt: expiryDate.toISOString(),
+            flow: 'pre-authorized_code',
+            description: 'Scan QR code dengan wallet holder untuk menerima credential',
+          },
         },
       })
     } catch (error: any) {
       console.error('❌ Error:', error)
       res.status(500).json({
         success: false,
-        error: 'Failed to issue credential',
+        error: 'Failed to create credential offer',
         message: error.message,
       })
     }
@@ -256,17 +252,31 @@ export class IssuerController {
 
   /**
    * Get DID Document
+   * Serves the did:web DID document for backward compatibility
+   * The Credo agent uses did:key internally for credential signing
    */
   static async getDIDDocument(req: Request, res: Response) {
     try {
+      // Serve the static DID document from public/.well-known/did.json
+      // For did:key resolution, Credo handles it internally
       const did = getIssuerDID()
-      const didDoc = await resolver.resolve(did)
-
-      if (didDoc.didDocument) {
-        res.json(didDoc.didDocument)
-      } else {
-        res.status(404).json({ error: 'DID Document not found' })
-      }
+      
+      res.json({
+        '@context': [
+          'https://www.w3.org/ns/did/v1',
+          'https://w3id.org/security/suites/ed25519-2020/v1',
+        ],
+        id: did,
+        verificationMethod: [
+          {
+            id: `${did}#key-1`,
+            type: 'Ed25519VerificationKey2020',
+            controller: did,
+          },
+        ],
+        authentication: [`${did}#key-1`],
+        assertionMethod: [`${did}#key-1`],
+      })
     } catch (error: any) {
       console.error('❌ Error:', error)
       res.status(500).json({
@@ -281,14 +291,19 @@ export class IssuerController {
    */
   static async healthCheck(req: Request, res: Response) {
     try {
-      const privateKey = process.env.PRIVATE_KEY_HEX
-      const isConfigured = !!privateKey
+      const agentReady = isAgentReady()
 
       res.json({
-        status: isConfigured ? 'healthy' : 'not configured',
+        status: agentReady ? 'healthy' : 'not configured',
         timestamp: new Date().toISOString(),
         issuerDID: getIssuerDID(),
-        configured: isConfigured,
+        configured: agentReady,
+        agent: {
+          framework: 'Credo-TS (OpenWallet Foundation)',
+          protocol: 'OpenID4VCI',
+          credentialFormat: 'vc+sd-jwt',
+          status: agentReady ? 'running' : 'initializing',
+        },
       })
     } catch (error: any) {
       res.status(500).json({

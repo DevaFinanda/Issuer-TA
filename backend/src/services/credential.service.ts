@@ -7,7 +7,9 @@ import * as crypto from 'crypto'
 // ============================================
 
 export interface CreateCredentialInput {
-  sdJwt: string
+  sdJwt?: string                    // Optional: filled when holder claims
+  credentialOfferUri?: string       // OpenID4VCI credential offer URI
+  issuanceSessionId?: string        // Credo issuance session ID
   holderDID: string
   holderName: string
   documentId: string
@@ -33,11 +35,15 @@ export interface CredentialWithId {
 
 /**
  * Store credential ke database
+ * In the new OID4VCI flow, sdJwt is initially null (credential not yet claimed)
+ * It gets updated when the holder claims the credential via the OID4VCI protocol
  */
 export async function storeCredentialDB(input: CreateCredentialInput): Promise<string> {
   const credential = await prisma.credential.create({
     data: {
-      sdJwt: input.sdJwt,
+      sdJwt: input.sdJwt || null,
+      credentialOfferUri: input.credentialOfferUri || null,
+      issuanceSessionId: input.issuanceSessionId || null,
       holderDID: input.holderDID,
       holderName: input.holderName,
       documentId: input.documentId,
@@ -51,6 +57,8 @@ export async function storeCredentialDB(input: CreateCredentialInput): Promise<s
       issuerDID: input.issuerDID,
       issuerName: input.issuerName || 'BPJS Kesehatan',
       validUntil: input.validUntil,
+      // Status starts as OFFERED in OID4VCI flow
+      status: input.credentialOfferUri ? CredentialStatus.OFFERED : CredentialStatus.ACTIVE,
     },
   })
 
@@ -251,12 +259,14 @@ export async function getAllCredentials(
 
 /**
  * Get all credentials from database (for API endpoint)
- * Returns all active credentials to verify persistence
+ * Returns all active and offered credentials to verify persistence
  */
 export async function getAllCredentialsFromDB() {
   return prisma.credential.findMany({
     where: {
-      status: CredentialStatus.ACTIVE,
+      status: {
+        in: [CredentialStatus.ACTIVE, CredentialStatus.OFFERED, CredentialStatus.CLAIMED],
+      },
     },
     orderBy: { issuedAt: 'desc' },
     select: {
@@ -271,6 +281,8 @@ export async function getAllCredentialsFromDB() {
       issuedAt: true,
       validUntil: true,
       metadata: true,
+      credentialOfferUri: true,
+      issuanceSessionId: true,
     },
   })
 }
