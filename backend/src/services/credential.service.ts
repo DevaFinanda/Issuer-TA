@@ -27,7 +27,7 @@ export interface CreateCredentialInput {
 
 export interface CredentialWithId {
   id: string
-  sdJwt: string
+  sdJwt: string | null   // null saat status OFFERED (belum diklaim holder)
   credentialData: any
   issuedAt: string
   expiresAt: string
