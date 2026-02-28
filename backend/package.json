@@ -28,6 +28,11 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@credo-ts/askar": "0.6.2",
+    "@credo-ts/core": "0.6.2",
+    "@credo-ts/node": "0.6.2",
+    "@credo-ts/openid4vc": "0.6.2",
+    "@openwallet-foundation/askar-nodejs": "0.6.0",
     "@prisma/client": "^5.22.0",
     "@sd-jwt/core": "^0.17.0",
     "@sd-jwt/types": "^0.17.0",
@@ -51,5 +56,16 @@
     "@types/qrcode": "^1.5.5",
     "tsx": "^4.7.0",
     "typescript": "^5.3.3"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@openwallet-foundation/askar-nodejs",
+      "koffi"
+    ],
+    "peerDependencyRules": {
+      "allowedVersions": {
+        "@openwallet-foundation/askar-shared": ">=0.4.3"
+      }
+    }
   }
 }

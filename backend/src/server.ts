@@ -16,7 +16,7 @@ import {
 import { checkDatabaseConnection, disconnectDatabase } from './lib/prisma.js'
 import { setUseDatabaseStorage } from './utils/credential-store.js'
 import { cleanupExpiredCredentials, getStatistics } from './services/credential.service.js'
-import { initializeCredoAgent, shutdownAgent, oid4vciRouter } from './credo-agent.js'
+import { initializeCredoAgent, shutdownAgent } from './credo-agent.js'
 
 dotenv.config()
 
@@ -81,14 +81,15 @@ app.get('/', (req, res) => {
 })
 
 // ============================================
-// OpenID4VCI Protocol Endpoints (managed by Credo)
-// These endpoints are automatically handled by the Credo agent:
-//   - GET  /oid4vci/.well-known/openid-credential-issuer
-//   - POST /oid4vci/token
-//   - POST /oid4vci/credential
-//   - GET  /oid4vci/offers/:id
+// OpenID4VCI Protocol Endpoints
+// Managed by Credo-TS OpenId4VcIssuerModule — endpoints are registered
+// directly on the Express app during agent.initialize().
+// No manual router needed — Credo handles:
+//   - GET  /oid4vci/<issuerId>/.well-known/openid-credential-issuer
+//   - POST /oid4vci/<issuerId>/token
+//   - POST /oid4vci/<issuerId>/credential
+//   - ... and other OID4VCI protocol endpoints
 // ============================================
-app.use('/oid4vci', oid4vciRouter)
 
 // Public endpoints
 app.get('/.well-known/did.json', IssuerController.getDIDDocument)
@@ -128,8 +129,8 @@ async function startServer() {
   // Initialize Credo Agent (OpenID4VCI)
   // ============================================
   try {
-    await initializeCredoAgent()
-    console.log('✅ Credo Agent initialized - OpenID4VCI protocol active')
+    await initializeCredoAgent(app)
+    console.log('✅ Credo-TS Agent initialized - OpenID4VCI protocol active')
   } catch (agentError: any) {
     console.error('⚠️ Credo Agent initialization failed:', agentError.message)
     console.error('⚠️ The server will start but credential issuance may not work.')
