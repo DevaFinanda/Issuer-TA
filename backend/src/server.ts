@@ -35,7 +35,19 @@ app.use(securityHeaders)
 app.use(rateLimiter)
 
 // CORS configuration dengan whitelist
-const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:5173,http://localhost:3000').split(',')
+// ALLOWED_ORIGINS env var WAJIB di-set di production (contoh: http://202.155.132.71:3000)
+// FALLBACK_ORIGINS dipakai hanya jika ALLOWED_ORIGINS tidak di-set di .env
+// Di VPS: set ALLOWED_ORIGINS=http://202.155.132.71:3000,http://202.155.132.71
+// Di lokal: set ALLOWED_ORIGINS=http://localhost:5173,http://localhost:3000
+const FALLBACK_ORIGINS = [
+  'http://localhost:5173',       // dev lokal (Vite)
+  'http://localhost:3000',       // dev lokal (Next.js)
+  'http://202.155.132.71:3000',  // VPS frontend
+  'http://202.155.132.71',       // VPS port 80
+]
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(',')
+  : FALLBACK_ORIGINS
 app.use(cors({
   origin: (origin, callback) => {
     if (!origin || allowedOrigins.includes(origin)) {

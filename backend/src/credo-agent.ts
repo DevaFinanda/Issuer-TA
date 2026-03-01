@@ -418,7 +418,7 @@ export function getIssuerDID(): string {
     return agentDidKey.did
   }
   // Fallback to did:web for display purposes before agent init
-  const domain = process.env.DID_WEB_DOMAIN || 'localhost:3001'
+  const domain = process.env.DID_WEB_DOMAIN || process.env.ISSUER_DOMAIN || '202.155.132.71:3001'
   return `did:web:${domain}`
 }
 
