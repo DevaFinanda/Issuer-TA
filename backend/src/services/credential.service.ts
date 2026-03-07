@@ -3,74 +3,66 @@ import type { Prisma } from '../lib/prisma.js'
 import * as crypto from 'crypto'
 
 // ============================================
-// CREDENTIAL SERVICE
+// CREDENTIAL SERVICE — OID4VCI IdentityCredential
 // ============================================
 
 export interface CreateCredentialInput {
-  sdJwt?: string                    // Optional: filled when holder claims
+  credentialJwt?: string            // Signed JWT VC (filled after issuance)
   credentialOfferUri?: string       // OpenID4VCI credential offer URI
-  issuanceSessionId?: string        // Credo issuance session ID
-  holderDID: string
+  format?: string                   // jwt_vc_json
+  holderDID?: string
   holderName: string
-  documentId: string
-  documentHash: string
-  documentType?: string
-  noBPJS: string
   nik: string
+  nama: string
   tanggalLahir?: string
-  alamat?: string
   metadata?: Record<string, any>
   issuerDID: string
   issuerName?: string
   validUntil: Date
+  userId?: string
 }
 
 export interface CredentialWithId {
   id: string
-  sdJwt: string | null   // null saat status OFFERED (belum diklaim holder)
+  credentialJwt: string | null
   credentialData: any
   issuedAt: string
   expiresAt: string
 }
 
 /**
- * Store credential ke database
- * In the new OID4VCI flow, sdJwt is initially null (credential not yet claimed)
- * It gets updated when the holder claims the credential via the OID4VCI protocol
+ * Store credential in database
  */
 export async function storeCredentialDB(input: CreateCredentialInput): Promise<string> {
   const credential = await prisma.credential.create({
     data: {
-      sdJwt: input.sdJwt || null,
+      credentialJwt: input.credentialJwt || null,
       credentialOfferUri: input.credentialOfferUri || null,
-      issuanceSessionId: input.issuanceSessionId || null,
-      holderDID: input.holderDID,
+      format: input.format || 'jwt_vc_json',
+      holderDID: input.holderDID || null,
       holderName: input.holderName,
-      documentId: input.documentId,
-      documentHash: input.documentHash,
-      documentType: input.documentType || 'BPJS_DOCUMENT',
-      noBPJS: input.noBPJS,
       nik: input.nik,
+      nama: input.nama,
       tanggalLahir: input.tanggalLahir,
-      alamat: input.alamat,
       metadata: input.metadata as Prisma.InputJsonValue,
       issuerDID: input.issuerDID,
-      issuerName: input.issuerName || 'BPJS Kesehatan',
+      issuerName: input.issuerName || 'Identity Credential Issuer',
       validUntil: input.validUntil,
-      // Status starts as OFFERED in OID4VCI flow
-      status: input.credentialOfferUri ? CredentialStatus.OFFERED : CredentialStatus.ACTIVE,
+      userId: input.userId || null,
+      status: input.credentialJwt ? CredentialStatus.ACTIVE : CredentialStatus.OFFERED,
     },
   })
 
-  // Log audit
+  // Audit log
   await createAuditLog({
     action: AuditAction.CREDENTIAL_ISSUED,
     entityType: 'Credential',
     entityId: credential.id,
     actorType: 'system',
     details: {
-      holderDID: input.holderDID,
-      documentId: input.documentId,
+      nik: input.nik,
+      holderName: input.holderName,
+      format: input.format || 'jwt_vc_json',
     },
   })
 
@@ -86,25 +78,19 @@ export async function getCredentialDB(id: string): Promise<CredentialWithId | nu
     where: { id },
   })
 
-  if (!credential) {
-    return null
-  }
+  if (!credential) return null
 
   // Check if expired
-  if (credential.validUntil < new Date()) {
-    // Update status to expired
+  if (credential.validUntil < new Date() && credential.status === CredentialStatus.ACTIVE) {
     await prisma.credential.update({
       where: { id },
       data: { status: CredentialStatus.EXPIRED },
     })
   }
 
-  // Check if revoked
-  if (credential.status === CredentialStatus.REVOKED) {
-    return null
-  }
+  if (credential.status === CredentialStatus.REVOKED) return null
 
-  // Log access
+  // Audit log
   await createAuditLog({
     action: AuditAction.CREDENTIAL_RETRIEVED,
     entityType: 'Credential',
@@ -114,13 +100,14 @@ export async function getCredentialDB(id: string): Promise<CredentialWithId | nu
 
   return {
     id: credential.id,
-    sdJwt: credential.sdJwt,
+    credentialJwt: credential.credentialJwt,
     credentialData: {
       holderName: credential.holderName,
       holderDID: credential.holderDID,
-      documentId: credential.documentId,
-      documentType: credential.documentType,
-      noBPJS: credential.noBPJS,
+      nik: credential.nik,
+      nama: credential.nama,
+      tanggalLahir: credential.tanggalLahir,
+      format: credential.format,
       metadata: credential.metadata,
     },
     issuedAt: credential.issuedAt.toISOString(),
@@ -129,28 +116,30 @@ export async function getCredentialDB(id: string): Promise<CredentialWithId | nu
 }
 
 /**
- * Get credential by holder DID
+ * Get all credentials from database
  */
-export async function getCredentialsByHolderDID(holderDID: string) {
+export async function getAllCredentialsFromDB() {
   return prisma.credential.findMany({
     where: {
-      holderDID,
-      status: CredentialStatus.ACTIVE,
+      status: {
+        in: [CredentialStatus.ACTIVE, CredentialStatus.OFFERED],
+      },
     },
     orderBy: { issuedAt: 'desc' },
-  })
-}
-
-/**
- * Get credential by BPJS number
- */
-export async function getCredentialByNoBPJS(noBPJS: string) {
-  return prisma.credential.findFirst({
-    where: {
-      noBPJS,
-      status: CredentialStatus.ACTIVE,
+    select: {
+      id: true,
+      holderName: true,
+      holderDID: true,
+      nik: true,
+      nama: true,
+      tanggalLahir: true,
+      format: true,
+      status: true,
+      issuedAt: true,
+      validUntil: true,
+      metadata: true,
+      credentialOfferUri: true,
     },
-    orderBy: { issuedAt: 'desc' },
   })
 }
 
@@ -162,15 +151,9 @@ export async function revokeCredential(
   reason?: string,
   revokedBy?: string
 ): Promise<boolean> {
-  const credential = await prisma.credential.findUnique({
-    where: { id },
-  })
+  const credential = await prisma.credential.findUnique({ where: { id } })
+  if (!credential) return false
 
-  if (!credential) {
-    return false
-  }
-
-  // Update credential status
   await prisma.credential.update({
     where: { id },
     data: {
@@ -180,16 +163,10 @@ export async function revokeCredential(
     },
   })
 
-  // Add to revocation list
   await prisma.revocationList.create({
-    data: {
-      credentialId: id,
-      reason,
-      revokedBy,
-    },
+    data: { credentialId: id, reason, revokedBy },
   })
 
-  // Audit log
   await createAuditLog({
     action: AuditAction.CREDENTIAL_REVOKED,
     entityType: 'Credential',
@@ -222,7 +199,6 @@ export async function getAllCredentials(
   status?: CredentialStatus
 ) {
   const skip = (page - 1) * limit
-
   const where: Prisma.CredentialWhereInput = status ? { status } : {}
 
   const [credentials, total] = await Promise.all([
@@ -235,9 +211,9 @@ export async function getAllCredentials(
         id: true,
         holderName: true,
         holderDID: true,
-        documentId: true,
-        documentType: true,
-        noBPJS: true,
+        nik: true,
+        nama: true,
+        format: true,
         status: true,
         issuedAt: true,
         validUntil: true,
@@ -258,36 +234,6 @@ export async function getAllCredentials(
 }
 
 /**
- * Get all credentials from database (for API endpoint)
- * Returns all active and offered credentials to verify persistence
- */
-export async function getAllCredentialsFromDB() {
-  return prisma.credential.findMany({
-    where: {
-      status: {
-        in: [CredentialStatus.ACTIVE, CredentialStatus.OFFERED, CredentialStatus.CLAIMED],
-      },
-    },
-    orderBy: { issuedAt: 'desc' },
-    select: {
-      id: true,
-      holderName: true,
-      holderDID: true,
-      documentId: true,
-      documentType: true,
-      noBPJS: true,
-      nik: true,
-      status: true,
-      issuedAt: true,
-      validUntil: true,
-      metadata: true,
-      credentialOfferUri: true,
-      issuanceSessionId: true,
-    },
-  })
-}
-
-/**
  * Search credentials
  */
 export async function searchCredentials(query: string) {
@@ -295,9 +241,8 @@ export async function searchCredentials(query: string) {
     where: {
       OR: [
         { holderName: { contains: query, mode: 'insensitive' } },
-        { noBPJS: { contains: query } },
         { nik: { contains: query } },
-        { documentId: { contains: query } },
+        { nama: { contains: query, mode: 'insensitive' } },
       ],
     },
     orderBy: { issuedAt: 'desc' },
@@ -306,8 +251,8 @@ export async function searchCredentials(query: string) {
       id: true,
       holderName: true,
       holderDID: true,
-      documentId: true,
-      noBPJS: true,
+      nik: true,
+      nama: true,
       status: true,
       issuedAt: true,
     },

@@ -8,18 +8,21 @@ const prisma = new PrismaClient()
 async function main() {
   console.log('🌱 Seeding database...')
 
-  // Create default admin user
-  const defaultPassword = 'admin123'
-  const passwordHash = await bcrypt.hash(defaultPassword, 12)
+  // ============================================
+  // 1. Create default admin user
+  // ============================================
+  const adminPassword = 'admin123'
+  const adminHash = await bcrypt.hash(adminPassword, 12)
 
   await prisma.user.upsert({
-    where: { username: 'admin' },
+    where: { email: 'admin@issuer.example.com' },
     update: {},
     create: {
       username: 'admin',
-      email: 'admin@bpjs.go.id',
-      passwordHash,
-      fullName: 'Admin BPJS',
+      email: 'admin@issuer.example.com',
+      passwordHash: adminHash,
+      fullName: 'Admin Issuer',
+      userType: 'ADMIN',
       role: 'SUPER_ADMIN',
       isActive: true,
     },
@@ -30,7 +33,60 @@ async function main() {
   console.log('   Password: admin123')
   console.log('   ⚠️  Change this password in production!')
 
-  // Create default API key for development
+  // ============================================
+  // 2. Create sample holder user (for testing)
+  // ============================================
+  const holderPassword = 'holder123'
+  const holderHash = await bcrypt.hash(holderPassword, 12)
+
+  await prisma.user.upsert({
+    where: { email: 'budi@example.com' },
+    update: {},
+    create: {
+      email: 'budi@example.com',
+      passwordHash: holderHash,
+      fullName: 'Budi Santoso',
+      nik: '3201234567890001',
+      nama: 'Budi Santoso',
+      tanggalLahir: new Date('1999-01-01'),
+      userType: 'HOLDER',
+      role: 'OPERATOR', // Holders use OPERATOR role
+      isActive: true,
+    },
+  })
+
+  console.log('✅ Created sample holder user')
+  console.log('   NIK: 3201234567890001')
+  console.log('   Nama: Budi Santoso')
+  console.log('   Password: holder123')
+
+  // Create second holder for testing
+  const holder2Hash = await bcrypt.hash('holder456', 12)
+
+  await prisma.user.upsert({
+    where: { email: 'siti@example.com' },
+    update: {},
+    create: {
+      email: 'siti@example.com',
+      passwordHash: holder2Hash,
+      fullName: 'Siti Aminah',
+      nik: '3201234567890002',
+      nama: 'Siti Aminah',
+      tanggalLahir: new Date('1995-05-15'),
+      userType: 'HOLDER',
+      role: 'OPERATOR',
+      isActive: true,
+    },
+  })
+
+  console.log('✅ Created second holder user')
+  console.log('   NIK: 3201234567890002')
+  console.log('   Nama: Siti Aminah')
+  console.log('   Password: holder456')
+
+  // ============================================
+  // 3. Create default API key for development
+  // ============================================
   const devApiKeyRaw = 'dev-api-key-for-testing-only'
   const devApiKeyHash = crypto.createHash('sha256').update(devApiKeyRaw).digest('hex')
 
@@ -49,11 +105,14 @@ async function main() {
   console.log('   Key: dev-api-key-for-testing-only')
   console.log('   ⚠️  DO NOT use this in production!')
 
-  // Create default issuer config
+  // ============================================
+  // 4. Create default issuer config
+  // ============================================
   const configs = [
-    { key: 'issuer_name', value: 'BPJS Kesehatan', description: 'Nama Issuer' },
-    { key: 'issuer_did_domain', value: 'localhost:3001', description: 'Domain untuk DID Web' },
+    { key: 'issuer_name', value: 'Identity Credential Issuer', description: 'Nama Issuer' },
+    { key: 'issuer_did_domain', value: 'localhost:3001', description: 'Domain untuk DID' },
     { key: 'credential_validity_days', value: '365', description: 'Validitas credential dalam hari' },
+    { key: 'credential_format', value: 'jwt_vc_json', description: 'Format credential yang didukung' },
   ]
 
   for (const config of configs) {

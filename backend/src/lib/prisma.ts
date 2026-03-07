@@ -1,7 +1,7 @@
 import { PrismaClient } from '@prisma/client'
 
-// Re-export enums (Prisma 7 generates these in the client)
-export { CredentialStatus, AuditAction } from '@prisma/client'
+// Re-export enums and types
+export { CredentialStatus, AuditAction, UserType, UserRole } from '@prisma/client'
 export type { Prisma } from '@prisma/client'
 
 // Singleton pattern untuk Prisma Client

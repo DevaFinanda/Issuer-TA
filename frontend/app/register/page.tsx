@@ -7,7 +7,9 @@ import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Mail, Lock, User, AlertCircle, CheckCircle } from "lucide-react"
+import { Input } from "@/components/ui/input"
+import { Lock, User, AlertCircle, CheckCircle, CreditCard, Calendar } from "lucide-react"
+import { holderApi } from "@/lib/api"
 
 export default function RegisterPage() {
   const router = useRouter()
@@ -15,16 +17,20 @@ export default function RegisterPage() {
   const [error, setError] = useState("")
   const [success, setSuccess] = useState(false)
   const [formData, setFormData] = useState({
-    fullName: "",
-    username: "",
-    email: "",
+    nik: "",
+    nama: "",
+    tanggalLahir: "",
     password: "",
     confirmPassword: "",
   })
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target
-    setFormData((prev) => ({ ...prev, [name]: value }))
+    if (name === "nik") {
+      setFormData((prev) => ({ ...prev, [name]: value.replace(/\D/g, "").slice(0, 16) }))
+    } else {
+      setFormData((prev) => ({ ...prev, [name]: value }))
+    }
     setError("")
   }
 
@@ -33,7 +39,12 @@ export default function RegisterPage() {
     setLoading(true)
     setError("")
 
-    // Validation
+    if (formData.nik.length !== 16) {
+      setError("NIK harus 16 digit")
+      setLoading(false)
+      return
+    }
+
     if (formData.password !== formData.confirmPassword) {
       setError("Password tidak sesuai")
       setLoading(false)
@@ -47,29 +58,20 @@ export default function RegisterPage() {
     }
 
     try {
-      const response = await fetch("/api/auth/register", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          fullName: formData.fullName,
-          username: formData.username,
-          email: formData.email,
-          password: formData.password,
-        }),
+      await holderApi.register({
+        nik: formData.nik,
+        nama: formData.nama,
+        tanggalLahir: formData.tanggalLahir,
+        password: formData.password,
       })
-
-      const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error(data.message || "Registrasi gagal")
-      }
 
       setSuccess(true)
       setTimeout(() => {
         router.push("/login")
       }, 2000)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Terjadi kesalahan")
+    } catch (err: any) {
+      const msg = err.response?.data?.error || err.message || "Registrasi gagal"
+      setError(msg)
     } finally {
       setLoading(false)
     }
@@ -88,8 +90,8 @@ export default function RegisterPage() {
             <div className="w-16 h-16 bg-gradient-to-br from-primary to-accent rounded-xl mx-auto mb-4 flex items-center justify-center">
               <User className="w-8 h-8 text-primary-foreground" />
             </div>
-            <CardTitle className="text-3xl font-bold">Buat Akun</CardTitle>
-            <CardDescription>Daftar sebagai admin BPJS</CardDescription>
+            <CardTitle className="text-3xl font-bold">Daftar Holder</CardTitle>
+            <CardDescription>Daftar untuk menerima IdentityCredential</CardDescription>
           </CardHeader>
 
           <CardContent>
@@ -113,48 +115,50 @@ export default function RegisterPage() {
                 )}
 
                 <div className="space-y-2">
+                  <label className="text-sm font-medium">NIK (Nomor Induk Kependudukan)</label>
+                  <div className="relative">
+                    <CreditCard className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
+                    <Input
+                      type="text"
+                      name="nik"
+                      value={formData.nik}
+                      onChange={handleChange}
+                      placeholder="3201234567890001"
+                      className="pl-10"
+                      required
+                      maxLength={16}
+                      minLength={16}
+                      pattern="[0-9]{16}"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
                   <label className="text-sm font-medium">Nama Lengkap</label>
                   <div className="relative">
                     <User className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
-                    <input
+                    <Input
                       type="text"
-                      name="fullName"
-                      value={formData.fullName}
+                      name="nama"
+                      value={formData.nama}
                       onChange={handleChange}
-                      placeholder="Ahmad Sulaiman"
-                      className="w-full pl-10 pr-4 py-2 border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary transition-all"
+                      placeholder="Budi Santoso"
+                      className="pl-10"
                       required
                     />
                   </div>
                 </div>
 
                 <div className="space-y-2">
-                  <label className="text-sm font-medium">Username</label>
+                  <label className="text-sm font-medium">Tanggal Lahir</label>
                   <div className="relative">
-                    <User className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
-                    <input
-                      type="text"
-                      name="username"
-                      value={formData.username}
+                    <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
+                    <Input
+                      type="date"
+                      name="tanggalLahir"
+                      value={formData.tanggalLahir}
                       onChange={handleChange}
-                      placeholder="admin123"
-                      className="w-full pl-10 pr-4 py-2 border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary transition-all"
-                      required
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Email</label>
-                  <div className="relative">
-                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
-                    <input
-                      type="email"
-                      name="email"
-                      value={formData.email}
-                      onChange={handleChange}
-                      placeholder="admin@bpjs.go.id"
-                      className="w-full pl-10 pr-4 py-2 border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary transition-all"
+                      className="pl-10"
                       required
                     />
                   </div>
@@ -164,14 +168,15 @@ export default function RegisterPage() {
                   <label className="text-sm font-medium">Password</label>
                   <div className="relative">
                     <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
-                    <input
+                    <Input
                       type="password"
                       name="password"
                       value={formData.password}
                       onChange={handleChange}
-                      placeholder="••••••••"
-                      className="w-full pl-10 pr-4 py-2 border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary transition-all"
+                      placeholder="Minimal 6 karakter"
+                      className="pl-10"
                       required
+                      minLength={6}
                     />
                   </div>
                 </div>
@@ -180,14 +185,15 @@ export default function RegisterPage() {
                   <label className="text-sm font-medium">Konfirmasi Password</label>
                   <div className="relative">
                     <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
-                    <input
+                    <Input
                       type="password"
                       name="confirmPassword"
                       value={formData.confirmPassword}
                       onChange={handleChange}
-                      placeholder="••••••••"
-                      className="w-full pl-10 pr-4 py-2 border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary transition-all"
+                      placeholder="Ulangi password"
+                      className="pl-10"
                       required
+                      minLength={6}
                     />
                   </div>
                 </div>

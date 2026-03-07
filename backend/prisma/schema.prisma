@@ -7,62 +7,148 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ============================================
+// USER MODEL — Admin & Holder
+// ============================================
 model User {
   id            String     @id @default(uuid())
-  username      String     @unique
+  username      String?    @unique  // Admin login (nullable for holders)
   email         String     @unique
   passwordHash  String
   fullName      String
+
+  // Holder-specific fields (OID4VCI)
+  nik           String?    @unique  // Nomor Induk Kependudukan (16 digit)
+  nama          String?             // Nama lengkap holder
+  tanggalLahir  DateTime?           // Tanggal lahir holder
+
+  // Role & Type
+  userType      UserType   @default(ADMIN)
   role          UserRole   @default(ADMIN)
   isActive      Boolean    @default(true)
+
+  // Session & Security
   lastLoginAt   DateTime?
   loginAttempts Int        @default(0)
   lockedUntil   DateTime?
+
+  // Timestamps
   createdAt     DateTime   @default(now())
   updatedAt     DateTime   @updatedAt
-  auditLogs     AuditLog[]
+
+  // Relations
+  auditLogs          AuditLog[]
+  authorizationCodes AuthorizationCode[]
+  accessTokens       AccessToken[]
+  credentials        Credential[]
 
   @@index([username])
   @@index([email])
+  @@index([nik])
   @@index([isActive])
   @@map("users")
 }
 
+// ============================================
+// AUTHORIZATION CODE — OID4VCI Auth Code Flow
+// ============================================
+model AuthorizationCode {
+  code        String   @id @unique
+  userId      String
+  clientId    String
+  redirectUri String
+  state       String?
+  used        Boolean  @default(false)
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("authorization_codes")
+}
+
+// ============================================
+// ACCESS TOKEN — OID4VCI Token Exchange
+// ============================================
+model AccessToken {
+  token     String   @id @unique
+  userId    String
+  revoked   Boolean  @default(false)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("access_tokens")
+}
+
+// ============================================
+// CREDENTIAL — Issued Verifiable Credentials
+// ============================================
 model Credential {
   id                  String           @id @default(uuid())
-  sdJwt               String?          // Filled when holder claims via OID4VCI (null during offer stage)
+  credentialJwt       String?          @db.Text  // Signed JWT VC (filled after issuance)
   credentialOfferUri  String?          // OpenID4VCI credential offer URI
-  issuanceSessionId   String?          // Credo agent issuance session ID
-  holderDID           String
+  format              String           @default("jwt_vc_json")
+
+  // Holder information
+  holderDID           String?
   holderName          String
-  documentId          String
-  documentHash        String
-  documentType        String           @default("BPJS_DOCUMENT")
-  noBPJS              String
   nik                 String
+  nama                String
   tanggalLahir        String?
-  alamat              String?
-  metadata            Json?
+
+  // Issuer information
   issuerDID           String
-  issuerName          String           @default("BPJS Kesehatan")
+  issuerName          String           @default("Identity Credential Issuer")
+
+  // Metadata
+  metadata            Json?
+
+  // Timestamps & Validity
   issuedAt            DateTime         @default(now())
   validFrom           DateTime         @default(now())
   validUntil          DateTime
+
+  // Status
   status              CredentialStatus @default(OFFERED)
-  claimedAt           DateTime?        // When holder successfully received the credential
+  claimedAt           DateTime?
   revokedAt           DateTime?
   revokedReason       String?
 
+  // Holder relation
+  userId              String?
+  user                User?            @relation(fields: [userId], references: [id])
+
   @@index([holderDID])
-  @@index([noBPJS])
   @@index([nik])
-  @@index([documentId])
   @@index([status])
   @@index([issuedAt])
-  @@index([issuanceSessionId])
+  @@index([userId])
   @@map("credentials")
 }
 
+// ============================================
+// CREDENTIAL OFFER — Stored offers for wallet retrieval
+// ============================================
+model CredentialOffer {
+  id         String   @id @default(uuid())
+  offerData  Json     // The credential offer JSON object
+  expiresAt  DateTime
+  used       Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  @@index([expiresAt])
+  @@map("credential_offers")
+}
+
+// ============================================
+// SUPPORTING MODELS
+// ============================================
 model RevocationList {
   id           String   @id @default(uuid())
   credentialId String   @unique
@@ -121,6 +207,14 @@ model IssuerConfig {
   @@map("issuer_config")
 }
 
+// ============================================
+// ENUMS
+// ============================================
+enum UserType {
+  ADMIN
+  HOLDER
+}
+
 enum UserRole {
   SUPER_ADMIN
   ADMIN
@@ -128,9 +222,8 @@ enum UserRole {
 }
 
 enum CredentialStatus {
-  OFFERED     // Credential offer created, waiting for holder to claim
-  CLAIMED     // Holder has received the credential via OID4VCI
-  ACTIVE      // Credential is active (alias for claimed, kept for backward compat)
+  OFFERED     // Credential offer created, waiting for holder
+  ACTIVE      // Credential issued and active
   REVOKED
   EXPIRED
   SUSPENDED
@@ -141,6 +234,9 @@ enum AuditAction {
   CREDENTIAL_RETRIEVED
   CREDENTIAL_REVOKED
   CREDENTIAL_VERIFIED
+  CREDENTIAL_OFFER_CREATED
+  AUTHORIZATION_CODE_ISSUED
+  TOKEN_ISSUED
   API_KEY_CREATED
   API_KEY_REVOKED
   CONFIG_UPDATED

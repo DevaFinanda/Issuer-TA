@@ -1,4 +1,4 @@
-// Prisma Schema untuk Issuer BPJS
+// Prisma Schema — Synced with backend schema
 // Database: PostgreSQL
 
 generator client {
@@ -11,128 +11,166 @@ datasource db {
 }
 
 // ============================================
-// MODELS
+// USER MODEL — Admin & Holder
 // ============================================
-
-// Tabel untuk menyimpan User/Admin untuk autentikasi
 model User {
-  id              String    @id @default(uuid())
-  
-  // User Information
-  username        String    @unique
-  email           String    @unique
-  passwordHash    String    // Bcrypt hashed password
-  fullName        String
-  
-  // Role & Status
-  role            UserRole  @default(ADMIN)
-  isActive        Boolean   @default(true)
-  
+  id            String     @id @default(uuid())
+  username      String?    @unique
+  email         String     @unique
+  passwordHash  String
+  fullName      String
+
+  // Holder-specific fields (OID4VCI)
+  nik           String?    @unique
+  nama          String?
+  tanggalLahir  DateTime?
+
+  // Role & Type
+  userType      UserType   @default(ADMIN)
+  role          UserRole   @default(ADMIN)
+  isActive      Boolean    @default(true)
+
   // Session & Security
-  lastLoginAt     DateTime?
-  loginAttempts   Int       @default(0)
-  lockedUntil     DateTime?
-  
+  lastLoginAt   DateTime?
+  loginAttempts Int        @default(0)
+  lockedUntil   DateTime?
+
   // Timestamps
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-  
-  // Audit trail
-  auditLogs       AuditLog[]
-  
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  // Relations
+  auditLogs          AuditLog[]
+  authorizationCodes AuthorizationCode[]
+  accessTokens       AccessToken[]
+  credentials        Credential[]
+
   @@index([username])
   @@index([email])
+  @@index([nik])
   @@index([isActive])
   @@map("users")
 }
 
-// Tabel untuk menyimpan Issued Credentials
+// ============================================
+// AUTHORIZATION CODE — OID4VCI Auth Code Flow
+// ============================================
+model AuthorizationCode {
+  code        String   @id @unique
+  userId      String
+  clientId    String
+  redirectUri String
+  state       String?
+  used        Boolean  @default(false)
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("authorization_codes")
+}
+
+// ============================================
+// ACCESS TOKEN — OID4VCI Token Exchange
+// ============================================
+model AccessToken {
+  token     String   @id @unique
+  userId    String
+  revoked   Boolean  @default(false)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("access_tokens")
+}
+
+// ============================================
+// CREDENTIAL — Issued Verifiable Credentials
+// ============================================
 model Credential {
-  id              String    @id @default(uuid())
-  
-  // SD-JWT Data
-  sdJwt           String    @db.Text  // SD-JWT credential lengkap
-  
-  // Holder Information
-  holderDID       String
-  holderName      String
-  
-  // Document Information
-  documentId      String
-  documentHash    String
-  documentType    String    @default("BPJS_DOCUMENT")
-  
-  // BPJS Specific Data (encrypted/hashed for privacy)
-  noBPJS          String
-  nik             String
-  tanggalLahir    String?
-  alamat          String?   @db.Text
-  
-  // Metadata
-  metadata        Json?     // Additional metadata as JSON
-  
-  // Issuer Information
-  issuerDID       String
-  issuerName      String    @default("BPJS Kesehatan")
-  
-  // Timestamps
-  issuedAt        DateTime  @default(now())
-  validFrom       DateTime  @default(now())
-  validUntil      DateTime  // Expiry date
-  
-  // Status
-  status          CredentialStatus @default(ACTIVE)
-  revokedAt       DateTime?
-  revokedReason   String?
-  
-  // Indexes for faster queries
+  id                  String           @id @default(uuid())
+  credentialJwt       String?          @db.Text
+  credentialOfferUri  String?
+  format              String           @default("jwt_vc_json")
+
+  holderDID           String?
+  holderName          String
+  nik                 String
+  nama                String
+  tanggalLahir        String?
+
+  issuerDID           String
+  issuerName          String           @default("Identity Credential Issuer")
+
+  metadata            Json?
+
+  issuedAt            DateTime         @default(now())
+  validFrom           DateTime         @default(now())
+  validUntil          DateTime
+
+  status              CredentialStatus @default(OFFERED)
+  claimedAt           DateTime?
+  revokedAt           DateTime?
+  revokedReason       String?
+
+  userId              String?
+  user                User?            @relation(fields: [userId], references: [id])
+
   @@index([holderDID])
-  @@index([noBPJS])
   @@index([nik])
-  @@index([documentId])
   @@index([status])
   @@index([issuedAt])
-  
+  @@index([userId])
   @@map("credentials")
 }
 
-// Tabel untuk Revocation List (optional, untuk credential revocation)
+// ============================================
+// CREDENTIAL OFFER
+// ============================================
+model CredentialOffer {
+  id         String   @id @default(uuid())
+  offerData  Json
+  expiresAt  DateTime
+  used       Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  @@index([expiresAt])
+  @@map("credential_offers")
+}
+
+// ============================================
+// SUPPORTING MODELS
+// ============================================
 model RevocationList {
-  id              String    @id @default(uuid())
-  credentialId    String    @unique
-  revokedAt       DateTime  @default(now())
-  reason          String?
-  revokedBy       String?   // Admin/System yang revoke
-  
+  id           String   @id @default(uuid())
+  credentialId String   @unique
+  revokedAt    DateTime @default(now())
+  reason       String?
+  revokedBy    String?
+
   @@index([credentialId])
   @@map("revocation_list")
 }
 
-// Tabel untuk Audit Log
 model AuditLog {
-  id              String    @id @default(uuid())
-  
-  // Action details
-  action          AuditAction
-  entityType      String    // "Credential", "RevocationList", etc.
-  entityId        String?
-  
-  // Actor
-  actorType       String    // "system", "admin", "api"
-  actorId         String?
-  
-  // User relation (optional)
-  userId          String?
-  user            User?     @relation(fields: [userId], references: [id])
-  
-  // Details
-  details         Json?     // Additional context
-  ipAddress       String?
-  userAgent       String?
-  
-  // Timestamp
-  createdAt       DateTime  @default(now())
-  
+  id         String      @id @default(uuid())
+  action     AuditAction
+  entityType String
+  entityId   String?
+  actorType  String
+  actorId    String?
+  details    Json?
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime    @default(now())
+  userId     String?
+  user       User?       @relation(fields: [userId], references: [id])
+
   @@index([action])
   @@index([entityType])
   @@index([createdAt])
@@ -140,45 +178,39 @@ model AuditLog {
   @@map("audit_logs")
 }
 
-// Tabel untuk API Keys (untuk keamanan API)
 model ApiKey {
-  id              String    @id @default(uuid())
-  name            String    // Nama/deskripsi API key
-  keyHash         String    @unique // Hashed API key
-  
-  // Permissions
-  permissions     String[]  @default(["read"])
-  
-  // Status
-  isActive        Boolean   @default(true)
-  
-  // Usage tracking
-  lastUsedAt      DateTime?
-  usageCount      Int       @default(0)
-  
-  // Timestamps
-  createdAt       DateTime  @default(now())
-  expiresAt       DateTime?
-  
+  id          String    @id @default(uuid())
+  name        String
+  keyHash     String    @unique
+  permissions String[]  @default(["read"])
+  isActive    Boolean   @default(true)
+  lastUsedAt  DateTime?
+  usageCount  Int       @default(0)
+  createdAt   DateTime  @default(now())
+  expiresAt   DateTime?
+
   @@index([keyHash])
   @@index([isActive])
   @@map("api_keys")
 }
 
-// Tabel untuk Issuer Configuration
 model IssuerConfig {
-  id              String    @id @default(uuid())
-  key             String    @unique
-  value           String    @db.Text
-  description     String?
-  updatedAt       DateTime  @updatedAt
-  
+  id          String   @id @default(uuid())
+  key         String   @unique
+  value       String
+  description String?
+  updatedAt   DateTime @updatedAt
+
   @@map("issuer_config")
 }
 
 // ============================================
 // ENUMS
 // ============================================
+enum UserType {
+  ADMIN
+  HOLDER
+}
 
 enum UserRole {
   SUPER_ADMIN
@@ -187,6 +219,7 @@ enum UserRole {
 }
 
 enum CredentialStatus {
+  OFFERED
   ACTIVE
   REVOKED
   EXPIRED
@@ -194,20 +227,21 @@ enum CredentialStatus {
 }
 
 enum AuditAction {
-  // User actions
+  CREDENTIAL_ISSUED
+  CREDENTIAL_RETRIEVED
+  CREDENTIAL_REVOKED
+  CREDENTIAL_VERIFIED
+  CREDENTIAL_OFFER_CREATED
+  AUTHORIZATION_CODE_ISSUED
+  TOKEN_ISSUED
+  API_KEY_CREATED
+  API_KEY_REVOKED
+  CONFIG_UPDATED
+  SYSTEM_ERROR
   USER_REGISTERED
   USER_LOGIN
   USER_LOGOUT
   USER_LOGIN_FAILED
   USER_UPDATED
   USER_DELETED
-  // Credential actions
-  CREDENTIAL_ISSUED
-  CREDENTIAL_RETRIEVED
-  CREDENTIAL_REVOKED
-  CREDENTIAL_VERIFIED
-  API_KEY_CREATED
-  API_KEY_REVOKED
-  CONFIG_UPDATED
-  SYSTEM_ERROR
 }

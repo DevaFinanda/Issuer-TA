@@ -8,9 +8,8 @@ const _geist = Geist({ subsets: ["latin"] })
 const _geistMono = Geist_Mono({ subsets: ["latin"] })
 
 export const metadata: Metadata = {
-  // <CHANGE> Updated title and description for BPJS Issuer app
-  title: "BPJS Credential Issuer",
-  description: "Sistem Penerbitkan Verifiable Credential Digital",
+  title: "IdentityCredential Issuer (OID4VCI)",
+  description: "Sistem Penerbitan Verifiable Credential — OID4VCI Authorization Code Flow",
   generator: "v0.app",
   icons: {
     icon: [

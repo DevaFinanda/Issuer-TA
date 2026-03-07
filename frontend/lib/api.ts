@@ -3,7 +3,7 @@ import axios from 'axios';
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 const API_KEY = process.env.NEXT_PUBLIC_API_KEY || 'change-this-in-production';
 
-// Create axios instance with config
+// Axios instance for admin endpoints (with API key)
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
   timeout: 30000,
@@ -13,64 +13,78 @@ const apiClient = axios.create({
   },
 });
 
-// Request interceptor untuk security
+// Axios instance for public OID4VCI endpoints (no API key)
+const publicClient = axios.create({
+  baseURL: API_BASE_URL,
+  timeout: 30000,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
+
+// Request interceptor
 apiClient.interceptors.request.use(
   (config) => {
-    // Add timestamp untuk mencegah replay attacks
     config.headers['X-Request-Time'] = Date.now().toString();
     return config;
   },
-  (error) => {
-    return Promise.reject(error);
-  }
+  (error) => Promise.reject(error)
 );
 
-// Response interceptor untuk error handling
+// Response interceptor
 apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 429) {
-      console.error('⚠️ Rate limit exceeded');
-    } else if (error.response?.status === 403) {
-      console.error('🚫 Access denied - Periksa API Key');
-    } else if (error.code === 'ERR_NETWORK') {
-      console.error(`❌ Network Error - Backend tidak dapat dijangkau di: ${API_BASE_URL}. Pastikan backend sudah berjalan.`);
-    }
+    if (error.response?.status === 429) console.error('⚠️ Rate limit exceeded');
+    else if (error.response?.status === 403) console.error('🚫 Access denied');
+    else if (error.code === 'ERR_NETWORK') console.error(`❌ Network Error — Backend di ${API_BASE_URL} tidak dapat dijangkau`);
     return Promise.reject(error);
   }
 );
 
-export interface IssueCredentialRequest {
-  documentId: string;
-  documentHash: string;
-  documentType: string;
-  holderDID: string;
-  // Data diri BPJS holder
-  holderName: string;
-  noBPJS: string;
-  nik: string;
-  tanggalLahir: string;
-  alamat: string;
-  metadata?: Record<string, any>;
-}
+// ============================================
+// Type Definitions
+// ============================================
 
-export interface VerifyDocumentResponse {
+export interface CredentialOfferResponse {
   success: boolean;
-  message: string;
-  credentialId: string;
+  offerId: string;
+  credentialOfferUri: string;
   qrCode: string;
-  credentialOfferUri: string;
-  issuanceSessionId: string;
-  credentialData: any;
+  expiresAt: string;
 }
 
-export interface IssueCredentialResponse {
+export interface RegisterHolderRequest {
+  nik: string;
+  nama: string;
+  tanggalLahir: string;
+  password: string;
+}
+
+export interface AuthorizeRequest {
+  nik: string;
+  password: string;
+  client_id: string;
+  redirect_uri: string;
+  state?: string;
+}
+
+export interface AuthorizeResponse {
   success: boolean;
-  credential: any;
-  message: string;
-  credentialOfferUri: string;
-  issuanceSessionId: string;
-  issuedAt: string;
+  code: string;
+  state?: string;
+  redirect_uri: string;
+}
+
+export interface TokenResponse {
+  access_token: string;
+  token_type: string;
+  expires_in: number;
+}
+
+export interface CredentialResponse {
+  format: string;
+  credential: string;
 }
 
 export interface ApiInfo {
@@ -78,37 +92,105 @@ export interface ApiInfo {
   version: string;
   description: string;
   endpoints: Record<string, string>;
+  credentialFormat: string;
+  flow: string;
   status: string;
 }
 
+export interface HealthCheckResponse {
+  status: string;
+  database: string;
+  issuerDID: string;
+  timestamp: string;
+}
+
+export interface StatsResponse {
+  success: boolean;
+  statistics: Record<string, any>;
+}
+
+// ============================================
+// Admin API (requires API key)
+// ============================================
+
 export const issuerApi = {
-  // Get API info
+  /** Get server info */
   async getInfo(): Promise<ApiInfo> {
     const response = await apiClient.get('/');
     return response.data;
   },
 
-  // Issue credential directly
-  async verifyDocument(data: IssueCredentialRequest): Promise<VerifyDocumentResponse> {
-    const response = await apiClient.post('/api/issue', data);
+  /** Create credential offer (admin) → returns QR code */
+  async createCredentialOffer(): Promise<CredentialOfferResponse> {
+    const response = await apiClient.post('/credential-offer');
     return response.data;
   },
 
-  // Issue credential (alias for compatibility)
-  async issueCredential(data: IssueCredentialRequest): Promise<IssueCredentialResponse> {
-    const response = await apiClient.post('/api/issue', data);
+  /** Get credential offer by ID */
+  async getCredentialOffer(offerId: string) {
+    const response = await publicClient.get(`/credential-offer/${offerId}`);
     return response.data;
   },
 
-  // Get DID document
-  async getDIDDocument() {
-    const response = await apiClient.get('/.well-known/did.json');
+  /** Get statistics (admin) */
+  async getStatistics(): Promise<StatsResponse> {
+    const response = await apiClient.get('/api/stats');
     return response.data;
   },
 
-  // Health check
-  async healthCheck() {
-    const response = await apiClient.get('/health');
+  /** Health check */
+  async healthCheck(): Promise<HealthCheckResponse> {
+    const response = await publicClient.get('/health');
+    return response.data;
+  },
+
+  /** Get issuer metadata */
+  async getIssuerMetadata() {
+    const response = await publicClient.get('/.well-known/openid-credential-issuer');
+    return response.data;
+  },
+};
+
+// ============================================
+// Holder API (public OID4VCI endpoints)
+// ============================================
+
+export const holderApi = {
+  /** Register holder (NIK + password) */
+  async register(data: RegisterHolderRequest) {
+    const response = await publicClient.post('/register', data);
+    return response.data;
+  },
+
+  /** Authorize (login as holder → get auth code) */
+  async authorize(data: AuthorizeRequest): Promise<AuthorizeResponse> {
+    const response = await publicClient.post('/authorize', data);
+    return response.data;
+  },
+
+  /** Exchange auth code for access token */
+  async exchangeToken(code: string): Promise<TokenResponse> {
+    const response = await publicClient.post('/token', {
+      grant_type: 'authorization_code',
+      code,
+    });
+    return response.data;
+  },
+
+  /** Request credential with access token */
+  async requestCredential(accessToken: string): Promise<CredentialResponse> {
+    const response = await publicClient.post(
+      '/credential',
+      {
+        format: 'jwt_vc_json',
+        credential_definition: {
+          type: ['VerifiableCredential', 'IdentityCredential'],
+        },
+      },
+      {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      }
+    );
     return response.data;
   },
 };

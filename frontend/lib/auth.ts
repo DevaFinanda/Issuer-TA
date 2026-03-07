@@ -75,6 +75,7 @@ export async function registerUser(data: {
       passwordHash,
       fullName: data.fullName,
       role: 'ADMIN',
+      userType: 'ADMIN',
     },
     select: {
       id: true,
@@ -197,7 +198,7 @@ export async function loginUser(username: string, password: string, ipAddress?: 
   // Generate token
   const token = generateToken({
     userId: user.id,
-    username: user.username,
+    username: user.username || user.email,
     email: user.email,
     role: user.role,
     fullName: user.fullName,
@@ -207,7 +208,7 @@ export async function loginUser(username: string, password: string, ipAddress?: 
     token,
     user: {
       id: user.id,
-      username: user.username,
+      username: user.username || user.email,
       email: user.email,
       fullName: user.fullName,
       role: user.role,

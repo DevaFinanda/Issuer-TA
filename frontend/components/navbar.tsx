@@ -34,7 +34,7 @@ export function Navbar({ adminName }: NavbarProps) {
             <div className="w-10 h-10 bg-gradient-to-br from-primary to-accent rounded-lg flex items-center justify-center">
               <FileText className="w-6 h-6 text-primary-foreground" />
             </div>
-            <span className="font-bold text-xl hidden sm:inline">BPJS Issuer</span>
+            <span className="font-bold text-xl hidden sm:inline">VC Issuer</span>
           </Link>
 
           {/* Desktop Navigation */}
@@ -59,7 +59,7 @@ export function Navbar({ adminName }: NavbarProps) {
           <div className="hidden md:flex items-center gap-3">
             <div className="text-right">
               <p className="text-sm font-medium">{adminName}</p>
-              <p className="text-xs text-muted-foreground">Admin BPJS</p>
+              <p className="text-xs text-muted-foreground">Admin Issuer</p>
             </div>
             <Button
               onClick={handleLogout}
