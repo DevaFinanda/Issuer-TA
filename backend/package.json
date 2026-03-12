@@ -9,6 +9,7 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "setup": "tsx src/setup.ts",
+    "did:generate": "tsx src/scripts/generate-did-doc.ts",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:push": "prisma db push",

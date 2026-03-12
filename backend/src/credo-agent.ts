@@ -1,28 +1,26 @@
 /**
- * Credo-TS Agent — Simplified for DID & Key Management Only
+ * Credo-TS Agent — Key Management Only (did:web)
  *
- * Uses Aries Askar for secure key storage and DID:key for credential signing.
- * OID4VCI protocol endpoints are now handled manually via Express routes
- * (not via the Credo OpenId4VcModule).
+ * Uses Aries Askar for secure Ed25519 key storage.
+ * DID is did:web — static, derived from ISSUER_DOMAIN env var.
+ * OID4VCI protocol endpoints are handled manually via Express routes.
  *
  * Key components:
- *   - @credo-ts/core       — Credo Agent, DID management
+ *   - @credo-ts/core       — Credo Agent, key management
  *   - @credo-ts/askar      — Aries Askar secure key store
  *   - @credo-ts/node       — Node.js platform bindings
  *
  * Exports:
- *   - initializeCredoAgent()  — Initialize agent and create/reuse DID:key
- *   - getIssuerKeyAndDid()    — Get issuer DID for VC signing
+ *   - initializeCredoAgent()  — Initialize agent and import signing key
+ *   - getIssuerDID()          — Returns did:web:<ISSUER_DOMAIN>
  *   - isAgentReady()          — Check if agent is initialized
  *   - shutdownAgent()         — Graceful shutdown
  */
 
-import type { DidKey } from '@credo-ts/core'
 import {
   Agent,
   ConsoleLogger,
   LogLevel,
-  DidKey as DidKeyClass,
   Kms,
   Buffer as CredoBuffer,
 } from '@credo-ts/core'
@@ -46,7 +44,6 @@ let agent: Agent<{
   kms: Kms.KeyManagementModule
 }>
 
-let agentDidKey: DidKey
 let agentInitialized = false
 
 // ============================================
@@ -76,10 +73,10 @@ function getAgentModules() {
 // ============================================
 
 /**
- * Initialize the Credo-TS Agent (DID + Key Management only)
+ * Initialize the Credo-TS Agent (Key Management only — did:web is static)
  */
 export async function initializeCredoAgent(): Promise<void> {
-  console.log('\n🚀 Initializing Credo-TS Agent (DID + Key Management)...')
+  console.log('\n🚀 Initializing Credo-TS Agent (Key Management for did:web)...')
 
   agent = new Agent({
     config: {
@@ -124,33 +121,16 @@ export async function initializeCredoAgent(): Promise<void> {
       type: { crv: 'Ed25519', kty: 'OKP' },
     })
     keyId = createResult.keyId
-    console.log('🔑 New Ed25519 signing key generated')
+    console.log('⚠️  No PRIVATE_KEY_HEX set — generated ephemeral key (not persistent!)')
+    console.log('⚠️  Run: npm run did:generate to create a persistent key pair')
   }
 
-  // ============================================
-  // Create or reuse DID:key
-  // ============================================
-  let did: string
-  try {
-    const didCreateResult = await agent.dids.create({
-      method: 'key',
-      options: { keyId },
-    })
-    did = didCreateResult.didState.did!
-    if (!did) throw new Error('Failed to create DID:key — no DID returned')
-    console.log(`🔑 New DID created: ${did}`)
-  } catch (e: any) {
-    const existingDids = await agent.dids.getCreatedDids({ method: 'key' })
-    if (existingDids.length === 0) throw e
-    did = existingDids[0].did
-    console.log(`♻️  Reusing existing DID: ${did}`)
-  }
-
-  agentDidKey = DidKeyClass.fromDid(did)
   agentInitialized = true
 
+  const did = getIssuerDID()
   console.log(`\n✅ Credo-TS Agent ready`)
-  console.log(`🔑 Issuer DID: ${did}`)
+  console.log(`🌐 Issuer DID: ${did}`)
+  console.log(`📄 DID Document: http://${process.env.ISSUER_DOMAIN || 'localhost:3001'}/.well-known/did.json`)
   console.log(`📋 Protocol: OID4VCI Authorization Code Flow`)
   console.log(`📦 Credential format: jwt_vc_json\n`)
 }
@@ -160,12 +140,14 @@ export async function initializeCredoAgent(): Promise<void> {
 // ============================================
 
 /**
- * Get the issuer's DID
+ * Returns the issuer's did:web DID.
+ * Format: did:web:<ISSUER_DOMAIN>
+ * e.g.    did:web:202.155.132.71  or  did:web:issuer.example.com
+ *
+ * The corresponding DID Document is served at:
+ *   http(s)://<ISSUER_DOMAIN>/.well-known/did.json
  */
 export function getIssuerDID(): string {
-  if (agentDidKey) {
-    return agentDidKey.did
-  }
   const domain = process.env.ISSUER_DOMAIN || 'localhost:3001'
   return `did:web:${domain}`
 }

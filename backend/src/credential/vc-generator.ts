@@ -3,6 +3,9 @@
  * 
  * Creates and signs W3C Verifiable Credentials in jwt_vc_json format
  * using Ed25519 (EdDSA) via the did-jwt-vc library.
+ *
+ * Issuer identity: did:web — public key resolvable via /.well-known/did.json
+ * JWT header `kid` is set to `<did>#key-1` so verifiers can fetch the public key.
  */
 
 import { createVerifiableCredentialJwt } from 'did-jwt-vc'
@@ -14,6 +17,7 @@ import type { CredentialSubject } from '../models/types.js'
 // ============================================
 
 let issuerDID: string = ''
+let issuerKid: string = ''
 let signer: any = null
 
 /**
@@ -24,6 +28,8 @@ export function initVCGenerator(config: {
   did: string
 }) {
   issuerDID = config.did
+  // kid references the verification method in the DID Document
+  issuerKid = `${config.did}#key-1`
 
   // Extract raw 32-byte Ed25519 private key
   const hexBuffer = Buffer.from(config.privateKeyHex, 'hex')
@@ -40,6 +46,8 @@ export function initVCGenerator(config: {
 
   signer = EdDSASigner(rawKey)
   console.log('🔐 VC Generator initialized with EdDSA signer')
+  console.log(`🌐 Issuer DID   : ${issuerDID}`)
+  console.log(`🔑 Signing kid  : ${issuerKid}`)
 }
 
 /**
@@ -89,12 +97,17 @@ export async function createSignedVC(
   }
 
   // Sign the VC as JWT using EdDSA (Ed25519)
+  // `kid` in JWT header → verifier resolves did:web → fetches did.json → finds public key
   const signedJwt = await createVerifiableCredentialJwt(
     vcPayload,
     {
       did: issuerDID,
       signer,
       alg: 'EdDSA',
+    },
+    {
+      // Set kid in JWT header so verifiers know which key to use from the DID Document
+      header: { kid: issuerKid },
     }
   )
 

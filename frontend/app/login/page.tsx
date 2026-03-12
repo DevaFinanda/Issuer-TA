@@ -89,7 +89,7 @@ export default function LoginPage() {
                     name="username"
                     value={formData.username}
                     onChange={handleChange}
-                    placeholder="admin"
+                    placeholder="Masukkan username"
                     className="w-full pl-10 pr-4 py-2 border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary transition-all"
                     required
                   />
@@ -126,10 +126,6 @@ export default function LoginPage() {
               <Link href="/register" className="text-primary font-semibold hover:underline">
                 Daftar
               </Link>
-            </div>
-
-            <div className="mt-4 p-3 bg-accent/5 border border-accent/20 rounded-lg text-xs text-muted-foreground">
-              Demo: username: <strong>admin</strong> | password: <strong>admin123</strong>
             </div>
           </CardContent>
         </Card>
