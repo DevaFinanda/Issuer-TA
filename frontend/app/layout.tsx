@@ -8,7 +8,7 @@ const _geist = Geist({ subsets: ["latin"] })
 const _geistMono = Geist_Mono({ subsets: ["latin"] })
 
 export const metadata: Metadata = {
-  title: "IdentityCredential Issuer (OID4VCI)",
+  title: "Issuer",
   description: "Sistem Penerbitan Verifiable Credential — OID4VCI Authorization Code Flow",
   generator: "v0.app",
   icons: {

@@ -46,6 +46,10 @@ export default function LoginPage() {
       // Store token and redirect
       localStorage.setItem("auth_token", data.token)
       localStorage.setItem("admin_name", data.adminName)
+
+      const isHttps = window.location.protocol === "https:"
+      document.cookie = `auth_token=${encodeURIComponent(data.token)}; Path=/; Max-Age=86400; SameSite=Lax${isHttps ? "; Secure" : ""}`
+
       router.push("/dashboard")
     } catch (err) {
       setError(err instanceof Error ? err.message : "An error occurred")

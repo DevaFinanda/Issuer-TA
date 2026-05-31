@@ -18,7 +18,10 @@ export function Navbar({ adminName }: NavbarProps) {
   const handleLogout = () => {
     localStorage.removeItem("auth_token")
     localStorage.removeItem("admin_name")
-    router.push("/login")
+    const isHttps = window.location.protocol === "https:"
+    document.cookie = `auth_token=; Path=/; Max-Age=0; SameSite=Lax${isHttps ? "; Secure" : ""}`
+    router.replace("/login")
+    router.refresh()
   }
 
   const navItems = [

@@ -7,6 +7,7 @@ import wellknownRoutes from './wellknown.routes.js'
 import authRoutes from './auth.routes.js'
 import tokenRoutes from './token.routes.js'
 import credentialRoutes from './credential.routes.js'
+import registryRoutes from './registry.routes.js'
 
 /**
  * Register all OID4VCI routes on the Express app
@@ -23,4 +24,7 @@ export function registerRoutes(app: Express) {
 
   // Credential offer + credential issuance
   app.use('/', credentialRoutes)
+
+  // Trusted registry + trust-list management
+  app.use('/', registryRoutes)
 }

@@ -25,6 +25,7 @@ model User {
   // Role & Type
   userType      UserType   @default(ADMIN)
   role          UserRole   @default(ADMIN)
+  onboardingStatus OnboardingStatus @default(VERIFIED)
   isActive      Boolean    @default(true)
 
   // Session & Security
@@ -41,6 +42,8 @@ model User {
   authorizationCodes AuthorizationCode[]
   accessTokens       AccessToken[]
   credentials        Credential[]
+  pairwiseDids       PairwiseDid[]
+  policyDecisions    PolicyDecision[]
 
   @@index([username])
   @@index([email])
@@ -207,6 +210,74 @@ model IssuerConfig {
   @@map("issuer_config")
 }
 
+model TrustedRegistryIdentity {
+  id              String   @id @default(uuid())
+  nik             String   @unique
+  nama            String
+  tanggalLahir    DateTime?
+  source          String   @default("PT21_IMPORT")
+  sourceRef       String?
+  livenessPassed  Boolean?
+  isActive        Boolean  @default(true)
+  rawData         Json?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([nik])
+  @@index([isActive])
+  @@map("trusted_registry_identities")
+}
+
+model TrustedIssuer {
+  id               String   @id @default(uuid())
+  did              String   @unique
+  name             String
+  isActive         Boolean  @default(true)
+  checkRevocation  Boolean  @default(false)
+  minMatchScore    Float    @default(0.7)
+  requiredClaims   String[] @default([])
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([did])
+  @@index([isActive])
+  @@map("trusted_issuers")
+}
+
+model PairwiseDid {
+  id         String   @id @default(uuid())
+  userId      String
+  context     String
+  holderDid   String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([userId, context])
+  @@unique([holderDid])
+  @@index([userId])
+  @@map("pairwise_dids")
+}
+
+model PolicyDecision {
+  id              String   @id @default(uuid())
+  userId          String
+  holderDid       String?
+  allowed         Boolean
+  reasonCodes     String[] @default([])
+  score           Float?
+  details         Json?
+  createdAt       DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([allowed])
+  @@index([createdAt])
+  @@map("policy_decisions")
+}
+
 // ============================================
 // ENUMS
 // ============================================
@@ -219,6 +290,13 @@ enum UserRole {
   SUPER_ADMIN
   ADMIN
   OPERATOR
+}
+
+enum OnboardingStatus {
+  PENDING_VERIFICATION
+  VERIFIED
+  REJECTED
+  SUSPENDED
 }
 
 enum CredentialStatus {

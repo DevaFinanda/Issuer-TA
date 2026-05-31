@@ -10,7 +10,54 @@
 
 import { createVerifiableCredentialJwt } from 'did-jwt-vc'
 import { EdDSASigner } from 'did-jwt'
-import type { CredentialSubject } from '../models/types.js'
+import crypto from 'crypto'
+import { ISSUER_DID, SIGNING_KID } from '../lib/issuer-url.js'
+
+function decodeBase64UrlJson<T = Record<string, unknown>>(part: string): T {
+  const normalized = part.replace(/-/g, '+').replace(/_/g, '/')
+  const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4)
+  const json = Buffer.from(padded, 'base64').toString('utf8')
+  return JSON.parse(json) as T
+}
+
+function normalizeCredentialId(inputId?: string): string {
+  const trimmed = String(inputId || '').trim()
+  if (!trimmed) {
+    return `urn:uuid:${crypto.randomUUID()}`
+  }
+
+  if (trimmed.startsWith('urn:uuid:')) {
+    return trimmed
+  }
+
+  return `urn:uuid:${trimmed}`
+}
+
+function assertSignedJwtVcIntegrity(signedJwt: string): void {
+  const parts = signedJwt.split('.')
+  if (parts.length !== 3) {
+    throw new Error('Generated credential is not a valid JWT compact string')
+  }
+
+  const payload = decodeBase64UrlJson<Record<string, unknown>>(parts[1])
+  const jti = typeof payload.jti === 'string' ? payload.jti : ''
+  const vc = (payload.vc && typeof payload.vc === 'object')
+    ? payload.vc as Record<string, unknown>
+    : {}
+  const vcId = typeof vc.id === 'string' ? vc.id : ''
+
+  if (!jti) {
+    throw new Error('Generated JWT VC is missing jti claim')
+  }
+
+  if (!vcId) {
+    throw new Error('Generated JWT VC is missing vc.id claim')
+  }
+
+  if (jti !== vcId) {
+    throw new Error(`Generated JWT VC has jti/vc.id mismatch (jti: ${jti}, vc.id: ${vcId})`)
+  }
+}
 
 // ============================================
 // KEY MANAGEMENT
@@ -27,9 +74,13 @@ export function initVCGenerator(config: {
   privateKeyHex: string
   did: string
 }) {
-  issuerDID = config.did
+  if (config.did && config.did !== ISSUER_DID) {
+    console.warn(`⚠️ Ignoring non-canonical DID from initVCGenerator: ${config.did}`)
+  }
+
+  issuerDID = ISSUER_DID
   // kid references the verification method in the DID Document
-  issuerKid = `${config.did}#key-1`
+  issuerKid = SIGNING_KID
 
   // Extract raw 32-byte Ed25519 private key
   const hexBuffer = Buffer.from(config.privateKeyHex, 'hex')
@@ -63,36 +114,35 @@ export function getIssuerDID(): string {
  * Follows W3C VC Data Model with JWT encoding.
  * Signed using EdDSA (Ed25519).
  * 
- * @param subject - The credential subject data (nik, nama, tanggal_lahir)
+ * @param subject - The credential subject data (holderName, nik, noBPJS, tanggalLahir)
  * @param holderDID - Optional holder DID for the `sub` claim
  * @returns Signed JWT string
  */
 export async function createSignedVC(
-  subject: CredentialSubject,
-  holderDID?: string
+  subject: Record<string, unknown>,
+  holderDID?: string,
+  credentialTypes: string[] = ['VerifiableCredential', 'KartuBPJSKesehatan'],
+  options?: { credentialId?: string }
 ): Promise<string> {
   if (!signer || !issuerDID) {
     throw new Error('VC Generator not initialized. Call initVCGenerator() first.')
   }
 
   const now = Math.floor(Date.now() / 1000)
-  const credentialId = `urn:uuid:${crypto.randomUUID()}`
+  const credentialId = normalizeCredentialId(options?.credentialId)
 
   // Build W3C VC payload for did-jwt-vc
   const vcPayload: any = {
     sub: holderDID || undefined,
     nbf: now,
+    jti: credentialId,
     vc: {
       '@context': ['https://www.w3.org/2018/credentials/v1'],
-      type: ['VerifiableCredential', 'IdentityCredential'],
+      type: credentialTypes,
       id: credentialId,
       issuer: issuerDID,
       issuanceDate: new Date(now * 1000).toISOString(),
-      credentialSubject: {
-        nik: subject.nik,
-        nama: subject.nama,
-        tanggal_lahir: subject.tanggal_lahir,
-      },
+      credentialSubject: subject,
     },
   }
 
@@ -110,6 +160,9 @@ export async function createSignedVC(
       header: { kid: issuerKid },
     }
   )
+
+  // Guard against non-compliant JWT VC before returning to controller.
+  assertSignedJwtVcIntegrity(signedJwt)
 
   console.log('✅ Signed JWT VC created')
   console.log('📋 Credential ID:', credentialId)

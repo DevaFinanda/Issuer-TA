@@ -16,14 +16,27 @@ export interface IssuerMetadata {
 
 export interface CredentialSupported {
   format: string
+  id?: string
   types: string[]
+  display?: Array<{
+    name: string
+    locale?: string
+    description?: string
+  }>
 }
 
 export interface CredentialOffer {
   credential_issuer: string
   credential_configuration_ids: string[]
   grants: {
-    authorization_code: Record<string, never>
+    authorization_code?: {
+      issuer_state?: string
+      authorization_server?: string
+    }
+    'urn:ietf:params:oauth:grant-type:pre-authorized_code'?: {
+      'pre-authorized_code': string
+      user_pin_required?: boolean
+    }
   }
 }
 
@@ -44,12 +57,18 @@ export interface TokenResponse {
   access_token: string
   token_type: string
   expires_in: number
+  c_nonce: string
+  c_nonce_expires_in: number
 }
 
 export interface CredentialRequest {
   format: string
   credential_definition: {
     type: string[]
+  }
+  proof: {
+    proof_type: 'jwt'
+    jwt: string
   }
 }
 
@@ -76,9 +95,10 @@ export interface VCPayload {
 }
 
 export interface CredentialSubject {
+  holderName: string
   nik: string
-  nama: string
-  tanggal_lahir: string
+  noBPJS: string
+  tanggalLahir?: string
 }
 
 // ============================================
@@ -86,10 +106,11 @@ export interface CredentialSubject {
 // ============================================
 
 export interface AuthorizeRequest {
-  nik: string
+  identifier: string
   password: string
   client_id: string
   redirect_uri: string
+  holder_did?: string
   state?: string
 }
 
@@ -110,6 +131,9 @@ declare global {
     interface Request {
       userId?: string
       userNik?: string
+      userDid?: string
+      cNonce?: string
+      accessToken?: string
     }
   }
 }

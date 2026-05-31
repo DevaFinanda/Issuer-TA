@@ -32,6 +32,7 @@ import {
 import { AskarModule, transformPrivateKeyToPrivateJwk } from '@credo-ts/askar'
 import { askar } from '@openwallet-foundation/askar-nodejs'
 import dotenv from 'dotenv'
+import { DID_DOCUMENT_URL, ISSUER_DID } from './lib/issuer-url.js'
 
 dotenv.config()
 
@@ -130,7 +131,7 @@ export async function initializeCredoAgent(): Promise<void> {
   const did = getIssuerDID()
   console.log(`\n✅ Credo-TS Agent ready`)
   console.log(`🌐 Issuer DID: ${did}`)
-  console.log(`📄 DID Document: http://${process.env.ISSUER_DOMAIN || 'localhost:3001'}/.well-known/did.json`)
+  console.log(`📄 DID Document: ${DID_DOCUMENT_URL}`)
   console.log(`📋 Protocol: OID4VCI Authorization Code Flow`)
   console.log(`📦 Credential format: jwt_vc_json\n`)
 }
@@ -141,15 +142,14 @@ export async function initializeCredoAgent(): Promise<void> {
 
 /**
  * Returns the issuer's did:web DID.
- * Format: did:web:<ISSUER_DOMAIN>
- * e.g.    did:web:202.155.132.71  or  did:web:issuer.example.com
+ * Format: did:web:<issuer-domain>
+ * e.g.    did:web:issuer.identia.my.id
  *
  * The corresponding DID Document is served at:
- *   http(s)://<ISSUER_DOMAIN>/.well-known/did.json
+ *   https://issuer.identia.my.id/.well-known/did.json
  */
 export function getIssuerDID(): string {
-  const domain = process.env.ISSUER_DOMAIN || 'localhost:3001'
-  return `did:web:${domain}`
+  return ISSUER_DID
 }
 
 /**

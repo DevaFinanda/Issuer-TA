@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Navbar } from "@/components/navbar"
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { issuerApi } from "@/lib/api"
 import { QrCode, Loader2, Copy, CheckCircle, AlertCircle, RefreshCw } from "lucide-react"
@@ -22,15 +22,40 @@ export default function IssuerPage() {
   } | null>(null)
   const [copied, setCopied] = useState(false)
 
+  const hasActiveSession = () => {
+    try {
+      const token = localStorage.getItem("auth_token")
+      const cookieToken = document.cookie
+        .split(";")
+        .map((item) => item.trim())
+        .find((item) => item.startsWith("auth_token="))
+
+      return Boolean(token && cookieToken)
+    } catch {
+      return false
+    }
+  }
+
   useEffect(() => {
     const token = localStorage.getItem("auth_token")
     const name = localStorage.getItem("admin_name")
-    if (!token) {
-      router.push("/login")
+    if (!token || !hasActiveSession()) {
+      router.replace("/login")
       return
     }
     setAdminName(name || "Admin")
     setLoading(false)
+  }, [router])
+
+  useEffect(() => {
+    const handlePageShow = () => {
+      if (!hasActiveSession()) {
+        router.replace("/login")
+      }
+    }
+
+    window.addEventListener("pageshow", handlePageShow)
+    return () => window.removeEventListener("pageshow", handlePageShow)
   }, [router])
 
   async function handleCreateOffer() {
@@ -82,10 +107,6 @@ export default function IssuerPage() {
               <QrCode className="w-8 h-8 text-blue-600" />
             </div>
             <CardTitle className="text-2xl">Terbitkan Credential Offer</CardTitle>
-            <CardDescription>
-              Buat QR code credential offer yang dapat di-scan oleh holder wallet.
-              Holder akan diminta login dengan NIK + password untuk menerima IdentityCredential.
-            </CardDescription>
           </CardHeader>
 
           <CardContent className="space-y-6">
@@ -98,10 +119,6 @@ export default function IssuerPage() {
 
             {!offer ? (
               <div className="text-center space-y-4">
-                <p className="text-sm text-muted-foreground">
-                  Klik tombol di bawah untuk membuat credential offer baru.
-                  QR code akan muncul untuk di-scan oleh holder.
-                </p>
                 <Button
                   onClick={handleCreateOffer}
                   disabled={creating}
@@ -178,20 +195,6 @@ export default function IssuerPage() {
                 </Button>
               </div>
             )}
-
-            {/* Flow explanation */}
-            <div className="border-t pt-4">
-              <h4 className="text-sm font-semibold mb-2">Alur OID4VCI Authorization Code Flow:</h4>
-              <ol className="text-xs text-muted-foreground space-y-1 list-decimal list-inside">
-                <li>Admin membuat credential offer (QR code)</li>
-                <li>Holder scan QR dengan wallet</li>
-                <li>Holder diarahkan ke halaman login (NIK + password)</li>
-                <li>Backend menerbitkan authorization code</li>
-                <li>Wallet menukar code → access token</li>
-                <li>Wallet request credential dengan access token</li>
-                <li>Backend menandatangani & mengembalikan JWT VC (IdentityCredential)</li>
-              </ol>
-            </div>
           </CardContent>
         </Card>
       </main>

@@ -2,8 +2,8 @@
 
 import type React from "react"
 
-import { useState } from "react"
-import { useRouter } from "next/navigation"
+import { Suspense, useState } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -11,18 +11,36 @@ import { Input } from "@/components/ui/input"
 import { Lock, User, AlertCircle, CheckCircle, CreditCard, Calendar } from "lucide-react"
 import { holderApi } from "@/lib/api"
 
-export default function RegisterPage() {
+function RegisterContent() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const [success, setSuccess] = useState(false)
   const [formData, setFormData] = useState({
     nik: "",
     nama: "",
+    email: "",
     tanggalLahir: "",
     password: "",
     confirmPassword: "",
   })
+
+  const authorizeParams = new URLSearchParams()
+  const clientId = searchParams.get("client_id")
+  const redirectUri = searchParams.get("redirect_uri")
+  const state = searchParams.get("state")
+  const offerId = searchParams.get("offer_id")
+
+  if (clientId) authorizeParams.set("client_id", clientId)
+  if (redirectUri) authorizeParams.set("redirect_uri", redirectUri)
+  if (state) authorizeParams.set("state", state)
+  if (offerId) authorizeParams.set("offer_id", offerId)
+
+  const hasAuthorizeContext = Boolean(clientId && redirectUri)
+  const postRegisterTarget = hasAuthorizeContext
+    ? `/authorize${authorizeParams.toString() ? `?${authorizeParams.toString()}` : ""}`
+    : "/login"
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target
@@ -51,8 +69,8 @@ export default function RegisterPage() {
       return
     }
 
-    if (formData.password.length < 6) {
-      setError("Password minimal 6 karakter")
+    if (formData.password.length < 8) {
+      setError("Password minimal 8 karakter")
       setLoading(false)
       return
     }
@@ -60,17 +78,31 @@ export default function RegisterPage() {
     try {
       await holderApi.register({
         nik: formData.nik,
-        nama: formData.nama,
-        tanggalLahir: formData.tanggalLahir,
+        nama: formData.nama.trim() || undefined,
+        email: formData.email.trim() || undefined,
+        tanggal_lahir: formData.tanggalLahir || undefined,
         password: formData.password,
       })
 
       setSuccess(true)
       setTimeout(() => {
-        router.push("/login")
+        router.push(postRegisterTarget)
       }, 2000)
     } catch (err: any) {
-      const msg = err.response?.data?.error || err.message || "Registrasi gagal"
+      const data = err.response?.data
+      const alreadyRegistered = err.response?.status === 409 || data?.code === "ALREADY_REGISTERED"
+
+      if (alreadyRegistered) {
+        setSuccess(true)
+        setError("")
+        setTimeout(() => {
+          router.push(postRegisterTarget)
+        }, 1500)
+        return
+      }
+
+      // Tampilkan detail validasi jika ada, fallback ke pesan error umum
+      const msg = data?.details?.join(' • ') || data?.error || err.message || "Registrasi gagal"
       setError(msg)
     } finally {
       setLoading(false)
@@ -91,7 +123,7 @@ export default function RegisterPage() {
               <User className="w-8 h-8 text-primary-foreground" />
             </div>
             <CardTitle className="text-3xl font-bold">Daftar Holder</CardTitle>
-            <CardDescription>Daftar untuk menerima IdentityCredential</CardDescription>
+            <CardDescription>Daftar untuk menerima Kartu BPJS Kesehatan</CardDescription>
           </CardHeader>
 
           <CardContent>
@@ -102,7 +134,7 @@ export default function RegisterPage() {
                 </div>
                 <div>
                   <p className="font-semibold text-lg">Registrasi Berhasil!</p>
-                  <p className="text-muted-foreground text-sm">Anda akan diarahkan ke halaman login...</p>
+                  <p className="text-muted-foreground text-sm">Akun siap digunakan. Anda akan diarahkan ke halaman login...</p>
                 </div>
               </div>
             ) : (
@@ -144,7 +176,21 @@ export default function RegisterPage() {
                       onChange={handleChange}
                       placeholder="Budi Santoso"
                       className="pl-10"
-                      required
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Email</label>
+                  <div className="relative">
+                    <User className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
+                    <Input
+                      type="email"
+                      name="email"
+                      value={formData.email}
+                      onChange={handleChange}
+                      placeholder="nama@email.com"
+                      className="pl-10"
                     />
                   </div>
                 </div>
@@ -159,7 +205,6 @@ export default function RegisterPage() {
                       value={formData.tanggalLahir}
                       onChange={handleChange}
                       className="pl-10"
-                      required
                     />
                   </div>
                 </div>
@@ -173,10 +218,10 @@ export default function RegisterPage() {
                       name="password"
                       value={formData.password}
                       onChange={handleChange}
-                      placeholder="Minimal 6 karakter"
+                      placeholder="Minimal 8 karakter"
                       className="pl-10"
                       required
-                      minLength={6}
+                      minLength={8}
                     />
                   </div>
                 </div>
@@ -193,7 +238,7 @@ export default function RegisterPage() {
                       placeholder="Ulangi password"
                       className="pl-10"
                       required
-                      minLength={6}
+                      minLength={8}
                     />
                   </div>
                 </div>
@@ -210,7 +255,7 @@ export default function RegisterPage() {
 
             <div className="mt-6 text-center text-sm">
               <span className="text-muted-foreground">Sudah punya akun? </span>
-              <Link href="/login" className="text-primary font-semibold hover:underline">
+              <Link href={postRegisterTarget} className="text-primary font-semibold hover:underline">
                 Masuk
               </Link>
             </div>
@@ -218,5 +263,13 @@ export default function RegisterPage() {
         </Card>
       </div>
     </div>
+  )
+}
+
+export default function RegisterPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center">Memuat...</div>}>
+      <RegisterContent />
+    </Suspense>
   )
 }

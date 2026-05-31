@@ -19,13 +19,30 @@ function AuthorizeContent() {
   const redirectUri = searchParams.get("redirect_uri") || ""
   const state = searchParams.get("state") || ""
   const offerId = searchParams.get("offer_id") || ""
+  const registerQuery = searchParams.toString()
+  const registerHref = `/register${registerQuery ? `?${registerQuery}` : ""}`
 
-  const [nik, setNik] = useState("")
+  const [identifier, setIdentifier] = useState("")
   const [password, setPassword] = useState("")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const [success, setSuccess] = useState(false)
   const [authCode, setAuthCode] = useState("")
+
+  function mapAuthorizeError(err: any): string {
+    const errorCode = err?.response?.data?.error
+    const errorDescription = err?.response?.data?.error_description
+
+    if (errorCode === "did_binding_conflict") {
+      return errorDescription || "Wallet DID ini sudah terikat ke akun lain. Ganti profile wallet lalu coba lagi."
+    }
+
+    if (errorCode === "invalid_grant") {
+      return "NIK/username/email atau password tidak valid. Pastikan akun dan profile wallet yang digunakan sudah benar."
+    }
+
+    return errorDescription || errorCode || err?.message || "Login gagal"
+  }
 
   // Validate required params
   const missingParams = !clientId || !redirectUri
@@ -37,7 +54,7 @@ function AuthorizeContent() {
 
     try {
       const result = await holderApi.authorize({
-        nik,
+        identifier,
         password,
         client_id: clientId,
         redirect_uri: redirectUri,
@@ -59,8 +76,7 @@ function AuthorizeContent() {
         }, 2000)
       }
     } catch (err: any) {
-      const msg = err.response?.data?.error || err.message || "Login gagal"
-      setError(msg)
+      setError(mapAuthorizeError(err))
     } finally {
       setLoading(false)
     }
@@ -75,7 +91,7 @@ function AuthorizeContent() {
           </div>
           <CardTitle className="text-2xl font-bold">Otorisasi Credential</CardTitle>
           <CardDescription>
-            Masukkan NIK dan password Anda untuk menerima IdentityCredential
+            Masukkan NIK dan password Anda untuk menerima Kartu BPJS Kesehatan
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -112,22 +128,19 @@ function AuthorizeContent() {
               )}
 
               <div className="space-y-2">
-                <label htmlFor="nik" className="text-sm font-medium text-gray-700">
-                  NIK (Nomor Induk Kependudukan)
+                <label htmlFor="identifier" className="text-sm font-medium text-gray-700">
+                  NIK / Username / Email
                 </label>
                 <div className="relative">
                   <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                   <Input
-                    id="nik"
+                    id="identifier"
                     type="text"
-                    placeholder="16 digit NIK"
-                    value={nik}
-                    onChange={(e) => setNik(e.target.value.replace(/\D/g, "").slice(0, 16))}
+                    placeholder="NIK (16 digit), username, atau email"
+                    value={identifier}
+                    onChange={(e) => setIdentifier(e.target.value)}
                     className="pl-10"
                     required
-                    maxLength={16}
-                    minLength={16}
-                    pattern="[0-9]{16}"
                   />
                 </div>
               </div>
@@ -151,7 +164,7 @@ function AuthorizeContent() {
                 </div>
               </div>
 
-              <Button type="submit" className="w-full" disabled={loading || nik.length !== 16}>
+              <Button type="submit" className="w-full" disabled={loading || identifier.trim().length === 0}>
                 {loading ? (
                   <>
                     <Loader2 className="w-4 h-4 mr-2 animate-spin" />
@@ -164,7 +177,7 @@ function AuthorizeContent() {
 
               <div className="text-center">
                 <a
-                  href="/register"
+                  href={registerHref}
                   className="text-sm text-blue-600 hover:underline"
                 >
                   Belum punya akun? Daftar di sini

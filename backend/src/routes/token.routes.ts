@@ -10,4 +10,7 @@ const router: IRouter = Router()
 // POST /token — Exchange authorization code for access token
 router.post('/token', TokenController.exchangeToken)
 
+// POST /oid4vci/token — Canonical OID4VCI token endpoint
+router.post('/oid4vci/token', TokenController.exchangeToken)
+
 export default router

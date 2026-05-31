@@ -4,6 +4,7 @@
 
 import { Request, Response, NextFunction } from 'express'
 import { prisma } from '../lib/prisma.js'
+import { getAccessTokenContext } from '../services/token.service.js'
 
 // ============================================
 // Bearer Token Verification (for OID4VCI credential endpoint)
@@ -51,6 +52,18 @@ export async function requireBearerToken(req: Request, res: Response, next: Next
     // Attach user info to request
     req.userId = accessToken.userId
     req.userNik = accessToken.user.nik || undefined
+    req.accessToken = token
+
+    const tokenContext = await getAccessTokenContext(token)
+    if (!tokenContext.valid || !tokenContext.holderDid || !tokenContext.cNonce) {
+      return res.status(401).json({
+        error: 'invalid_token',
+        error_description: 'Access token is missing DID/nonce context',
+      })
+    }
+
+    req.userDid = tokenContext.holderDid
+    req.cNonce = tokenContext.cNonce
 
     next()
   } catch (error: any) {

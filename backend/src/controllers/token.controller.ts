@@ -10,7 +10,9 @@ import {
   AuthError,
 } from '../services/auth.service.js'
 import { generateAccessToken } from '../services/token.service.js'
-import { validateTokenRequest } from '../security/validation.js'
+import { validateDid, validateTokenRequest } from '../security/validation.js'
+import { getUserIdByDid } from '../services/user.service.js'
+import { prisma } from '../lib/prisma.js'
 
 export class TokenController {
   /**
@@ -33,23 +35,101 @@ export class TokenController {
         })
       }
 
-      const { code, client_id } = req.body
+      const grantType = String(req.body.grant_type || '').trim()
 
-      // Verify authorization code
-      const authResult = await verifyAuthorizationCode({
-        code,
-        clientId: client_id,
-      })
+      let tokenResult: {
+        accessToken: string
+        expiresIn: number
+        cNonce: string
+        cNonceExpiresIn: number
+      }
+      let issuedForUserId = ''
 
-      // Generate access token
-      const tokenResult = await generateAccessToken(authResult.userId)
+      if (grantType === 'authorization_code') {
+        const { code, client_id } = req.body
 
-      console.log('✅ Access token issued for user:', authResult.userId)
+        // Verify authorization code
+        const authResult = await verifyAuthorizationCode({
+          code,
+          clientId: client_id,
+        })
+
+        // Generate DID-bound access token
+        tokenResult = await generateAccessToken(authResult.userId, authResult.holderDid)
+        issuedForUserId = authResult.userId
+      } else {
+        const preAuthorizedCode = String(req.body['pre-authorized_code'] || req.body.pre_authorized_code || '').trim()
+        const holderDid = String(req.body.holder_did || req.body.wallet_did || '').trim()
+
+        const didValidation = validateDid(holderDid)
+        if (!didValidation.valid) {
+          return res.status(400).json({
+            error: 'invalid_request',
+            error_description: didValidation.error,
+          })
+        }
+
+        const preAuthRecord = await prisma.issuerConfig.findUnique({
+          where: { key: `pre-auth-code:${preAuthorizedCode}` },
+        })
+
+        if (!preAuthRecord?.value) {
+          return res.status(400).json({
+            error: 'invalid_grant',
+            error_description: 'Invalid pre-authorized code',
+          })
+        }
+
+        const metadata = JSON.parse(preAuthRecord.value) as {
+          used?: boolean
+          expiresAt?: string
+        }
+
+        if (metadata.used) {
+          return res.status(400).json({
+            error: 'invalid_grant',
+            error_description: 'Pre-authorized code has already been used',
+          })
+        }
+
+        if (!metadata.expiresAt || new Date(metadata.expiresAt) < new Date()) {
+          return res.status(400).json({
+            error: 'invalid_grant',
+            error_description: 'Pre-authorized code has expired',
+          })
+        }
+
+        const userId = await getUserIdByDid(holderDid)
+        if (!userId) {
+          return res.status(400).json({
+            error: 'invalid_grant',
+            error_description: 'holder_did is not registered in trusted registry',
+          })
+        }
+
+        tokenResult = await generateAccessToken(userId, holderDid)
+        issuedForUserId = userId
+
+        await prisma.issuerConfig.update({
+          where: { key: `pre-auth-code:${preAuthorizedCode}` },
+          data: {
+            value: JSON.stringify({
+              ...metadata,
+              used: true,
+              usedAt: new Date().toISOString(),
+            }),
+          },
+        })
+      }
+
+      console.log('✅ Access token issued for user:', issuedForUserId)
 
       res.json({
         access_token: tokenResult.accessToken,
         token_type: 'Bearer',
         expires_in: tokenResult.expiresIn,
+        c_nonce: tokenResult.cNonce,
+        c_nonce_expires_in: tokenResult.cNonceExpiresIn,
       })
     } catch (error: any) {
       if (error instanceof AuthError) {

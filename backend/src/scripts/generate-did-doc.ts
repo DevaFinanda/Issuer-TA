@@ -17,6 +17,7 @@ import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import dotenv from 'dotenv'
+import { BASE_URL, ISSUER_DID, ISSUER_DID_DOMAIN, ISSUER_DID_KEY_ID } from '../lib/issuer-url.js'
 
 dotenv.config()
 
@@ -25,7 +26,34 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 // ============================================
 // Derive Ed25519 public key from raw private key hex
 // ============================================
-function derivePublicKeyJwk(privateKeyHex: string): { x: string } {
+function encodeBase58(bytes: Buffer): string {
+  const alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
+  let zeros = 0
+  while (zeros < bytes.length && bytes[zeros] === 0) zeros += 1
+
+  const digits = [0]
+  for (const byte of bytes) {
+    let carry = byte
+    for (let i = 0; i < digits.length; i += 1) {
+      const value = digits[i] * 256 + carry
+      digits[i] = value % 58
+      carry = Math.floor(value / 58)
+    }
+    while (carry > 0) {
+      digits.push(carry % 58)
+      carry = Math.floor(carry / 58)
+    }
+  }
+
+  return `${'1'.repeat(zeros)}${digits.reverse().map((digit) => alphabet[digit]).join('')}`
+}
+
+function toEd25519PublicKeyMultibase(rawPublicKey: Buffer): string {
+  const ed25519PublicKeyMulticodec = Buffer.from([0xed, 0x01])
+  return `z${encodeBase58(Buffer.concat([ed25519PublicKeyMulticodec, rawPublicKey]))}`
+}
+
+function derivePublicKeyMultibase(privateKeyHex: string): string {
   const hexBuffer = Buffer.from(privateKeyHex, 'hex')
   let rawPrivateKey: Buffer
 
@@ -50,10 +78,7 @@ function derivePublicKeyJwk(privateKeyHex: string): { x: string } {
   const spkiDer = publicKeyObj.export({ type: 'spki', format: 'der' }) as Buffer
   const rawPublicKey = spkiDer.subarray(-32)
 
-  return {
-    // Ed25519 JWK: `x` = base64url of 32-byte public key
-    x: rawPublicKey.toString('base64url'),
-  }
+  return toEd25519PublicKeyMultibase(rawPublicKey)
 }
 
 // ============================================
@@ -66,19 +91,13 @@ function main() {
     process.exit(1)
   }
 
-  const issuerDomain = process.env.ISSUER_DOMAIN
-  if (!issuerDomain) {
-    console.error('❌ ISSUER_DOMAIN is not set in .env (e.g. 202.155.132.71 or issuer.example.com)')
-    process.exit(1)
-  }
-
-  const did = `did:web:${issuerDomain}`
-  const keyId = `${did}#key-1`
+  const did = ISSUER_DID
+  const keyId = ISSUER_DID_KEY_ID
 
   console.log(`\n🔑 Generating DID Document for: ${did}`)
 
-  const { x } = derivePublicKeyJwk(privateKeyHex)
-  console.log(`🔑 Derived public key (x): ${x}`)
+  const publicKeyMultibase = derivePublicKeyMultibase(privateKeyHex)
+  console.log(`🔑 Derived public key (multibase): ${publicKeyMultibase}`)
 
   const didDocument = {
     '@context': [
@@ -89,24 +108,12 @@ function main() {
     verificationMethod: [
       {
         id: keyId,
-        type: 'JsonWebKey2020',
+        type: 'Ed25519VerificationKey2020',
         controller: did,
-        publicKeyJwk: {
-          kty: 'OKP',
-          crv: 'Ed25519',
-          x: x,
-        },
+        publicKeyMultibase,
       },
     ],
-    authentication: [keyId],
     assertionMethod: [keyId],
-    service: [
-      {
-        id: `${did}#issuer-service`,
-        type: 'VerifiableCredentialIssuer',
-        serviceEndpoint: `http://${issuerDomain}:${process.env.PORT || 3001}`,
-      },
-    ],
   }
 
   // Write to public/.well-known/did.json
@@ -119,7 +126,8 @@ function main() {
   console.log(`\n✅ DID Document written to: ${outputPath}`)
   console.log(`\n📋 DID Document preview:\n${JSON.stringify(didDocument, null, 2)}`)
   console.log(`\n📡 After deploying to VPS, verifiers can resolve:`)
-  console.log(`   GET http://${issuerDomain}/.well-known/did.json`)
+  console.log(`   GET ${BASE_URL}/.well-known/did.json`)
+  console.log(`   DID = did:web:${ISSUER_DID_DOMAIN}`)
   console.log(`\n⚠️  IMPORTANT: Restart the issuer server to serve the updated did.json`)
 }
 

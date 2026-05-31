@@ -4,24 +4,137 @@
 
 import crypto from 'crypto'
 import { prisma, AuditAction } from '../lib/prisma.js'
-import { findUserByNIK, verifyPassword } from './user.service.js'
+import { verifyPassword } from './user.service.js'
+import bcrypt from 'bcryptjs'
+import { normalizeDidForStorage } from '../lib/did.js'
 
 const AUTH_CODE_EXPIRY_MINUTES = 10
+const BCRYPT_ROUNDS = 12
+
+function isNikFormat(value: string): boolean {
+  return /^\d{16}$/.test(value)
+}
+
+function isBcryptHash(value: string): boolean {
+  return /^\$2[aby]\$\d{2}\$/.test(String(value || ''))
+}
+
+async function findUserByIdentifier(identifier: string) {
+  return prisma.user.findFirst({
+    where: {
+      OR: [
+        { nik: identifier },
+        { username: identifier },
+        { email: identifier.toLowerCase() },
+      ],
+    },
+  })
+}
+
+async function createHolderFromRegistryIfAllowed(input: {
+  identifier: string
+  password: string
+}) {
+  if (!isNikFormat(input.identifier)) {
+    return null
+  }
+
+  const registryIdentity = await (prisma as any).trustedRegistryIdentity.findUnique({
+    where: { nik: input.identifier },
+  })
+
+  if (!registryIdentity || registryIdentity.isActive !== true) {
+    return null
+  }
+
+  const generatedEmail = `${input.identifier}@holder.identia.local`
+  const generatedName = String(registryIdentity.nama || '').trim() || `Pemegang ${input.identifier.slice(-4)}`
+  const passwordHash = await bcrypt.hash(input.password, BCRYPT_ROUNDS)
+
+  try {
+    const created = await (prisma.user as any).create({
+      data: {
+        email: generatedEmail,
+        passwordHash,
+        fullName: generatedName,
+        nik: input.identifier,
+        nama: generatedName,
+        tanggalLahir: registryIdentity.tanggalLahir || null,
+        userType: 'HOLDER',
+        role: 'OPERATOR',
+        onboardingStatus: 'VERIFIED',
+        isActive: true,
+      },
+    })
+
+    await prisma.auditLog.create({
+      data: {
+        action: AuditAction.USER_REGISTERED,
+        entityType: 'User',
+        entityId: created.id,
+        actorType: 'holder',
+        actorId: created.id,
+        details: {
+          source: 'registry_auto_provision',
+          nik: input.identifier,
+        } as any,
+      },
+    })
+
+    return created
+  } catch {
+    // Handle race/duplicate gracefully by fetching the row again.
+    return findUserByIdentifier(input.identifier)
+  }
+}
+
+async function verifyAndUpgradePassword(user: {
+  id: string
+  passwordHash: string
+}, plainPassword: string): Promise<boolean> {
+  if (isBcryptHash(user.passwordHash)) {
+    return verifyPassword(user.passwordHash, plainPassword)
+  }
+
+  const legacyValid = user.passwordHash === plainPassword
+  if (!legacyValid) {
+    return false
+  }
+
+  const newHash = await bcrypt.hash(plainPassword, BCRYPT_ROUNDS)
+  await (prisma.user as any).update({
+    where: { id: user.id },
+    data: { passwordHash: newHash },
+  })
+
+  return true
+}
 
 /**
  * Authenticate user by NIK + password and generate authorization code
  */
 export async function authenticateAndGenerateCode(input: {
-  nik: string
+  identifier: string   // NIK, username, or email
   password: string
   clientId: string
   redirectUri: string
+  holderDid: string
   state?: string
-}): Promise<{ code: string; redirectUrl: string }> {
-  // Find user by NIK
-  const user = await findUserByNIK(input.nik)
+}): Promise<{ code: string; redirectUrl: string; userId: string }> {
+  const normalizedHolderDid = normalizeDidForStorage(input.holderDid)
+  const normalizedIdentifier = input.identifier.trim()
+
+  // Find user by NIK first, then fall back to username or email.
+  // If a trusted registry NIK exists but user row does not, auto-provision holder account.
+  const user =
+    (await findUserByIdentifier(normalizedIdentifier)) ||
+    (await createHolderFromRegistryIfAllowed({
+      identifier: normalizedIdentifier,
+      password: input.password,
+    }))
+
   if (!user) {
-    throw new AuthError('Invalid NIK or password', 401)
+    throw new AuthError('NIK / username atau password salah', 401)
   }
 
   // Check if account is locked
@@ -35,7 +148,7 @@ export async function authenticateAndGenerateCode(input: {
   }
 
   // Verify password
-  const passwordValid = await verifyPassword(user.passwordHash, input.password)
+  const passwordValid = await verifyAndUpgradePassword(user, input.password)
   if (!passwordValid) {
     // Increment failed login attempts
     const newAttempts = user.loginAttempts + 1
@@ -44,7 +157,7 @@ export async function authenticateAndGenerateCode(input: {
     // Lock account after 5 failed attempts (15 minutes)
     if (newAttempts >= 5) {
       updateData.lockedUntil = new Date(Date.now() + 15 * 60 * 1000)
-      console.warn(`🔒 Account locked for NIK: ${input.nik} (${newAttempts} failed attempts)`)
+      console.warn(`🔒 Account locked for: ${normalizedIdentifier} (${newAttempts} failed attempts)`)
     }
 
     await prisma.user.update({
@@ -59,11 +172,11 @@ export async function authenticateAndGenerateCode(input: {
         entityType: 'User',
         entityId: user.id,
         actorType: 'holder',
-        details: { nik: input.nik, attempts: newAttempts } as any,
+        details: { identifier: normalizedIdentifier, attempts: newAttempts } as any,
       },
     })
 
-    throw new AuthError('Invalid NIK or password', 401)
+    throw new AuthError('NIK / username atau password salah', 401)
   }
 
   // Reset login attempts on success
@@ -93,6 +206,29 @@ export async function authenticateAndGenerateCode(input: {
     },
   })
 
+  await prisma.issuerConfig.upsert({
+    where: { key: `auth-code-meta:${code}` },
+    update: {
+      value: JSON.stringify({
+        holderDid: normalizedHolderDid,
+        clientId: input.clientId,
+        userId: user.id,
+        createdAt: new Date().toISOString(),
+      }),
+      description: 'OID4VCI authorization code metadata',
+    },
+    create: {
+      key: `auth-code-meta:${code}`,
+      value: JSON.stringify({
+        holderDid: normalizedHolderDid,
+        clientId: input.clientId,
+        userId: user.id,
+        createdAt: new Date().toISOString(),
+      }),
+      description: 'OID4VCI authorization code metadata',
+    },
+  })
+
   // Audit log
   await prisma.auditLog.create({
     data: {
@@ -111,7 +247,90 @@ export async function authenticateAndGenerateCode(input: {
   }
 
   console.log('✅ Authorization code issued for user:', user.nik)
-  return { code, redirectUrl }
+  return { code, redirectUrl, userId: user.id }
+}
+
+/**
+ * Authenticate using username/email/NIK + password.
+ * This supports the simple POST /login flow used before credential issuance.
+ */
+export async function authenticateUserLogin(input: {
+  username: string
+  password: string
+}): Promise<{ userId: string; displayName: string; studentId: string }> {
+  const loginId = input.username.trim()
+
+  const user =
+    (await findUserByIdentifier(loginId)) ||
+    (await createHolderFromRegistryIfAllowed({
+      identifier: loginId,
+      password: input.password,
+    }))
+
+  if (!user) {
+    throw new AuthError('Invalid username or password', 401)
+  }
+
+  if (user.lockedUntil && user.lockedUntil > new Date()) {
+    throw new AuthError('Account is temporarily locked. Try again later.', 423)
+  }
+
+  if (!user.isActive) {
+    throw new AuthError('Account is not active', 403)
+  }
+
+  const passwordValid = await verifyAndUpgradePassword(user, input.password)
+  if (!passwordValid) {
+    const newAttempts = user.loginAttempts + 1
+    const updateData: { loginAttempts: number; lockedUntil?: Date } = { loginAttempts: newAttempts }
+
+    if (newAttempts >= 5) {
+      updateData.lockedUntil = new Date(Date.now() + 15 * 60 * 1000)
+    }
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: updateData,
+    })
+
+    await prisma.auditLog.create({
+      data: {
+        action: AuditAction.USER_LOGIN_FAILED,
+        entityType: 'User',
+        entityId: user.id,
+        actorType: 'holder',
+        details: { username: loginId, attempts: newAttempts } as any,
+      },
+    })
+
+    throw new AuthError('Invalid username or password', 401)
+  }
+
+  await prisma.user.update({
+    where: { id: user.id },
+    data: {
+      loginAttempts: 0,
+      lockedUntil: null,
+      lastLoginAt: new Date(),
+    },
+  })
+
+  await prisma.auditLog.create({
+    data: {
+      action: AuditAction.USER_LOGIN,
+      entityType: 'User',
+      entityId: user.id,
+      actorType: 'holder',
+      actorId: user.id,
+      details: { username: loginId } as any,
+    },
+  })
+
+  return {
+    userId: user.id,
+    displayName: user.nama || user.fullName,
+    studentId: user.nik || user.username || user.id,
+  }
 }
 
 /**
@@ -120,7 +339,7 @@ export async function authenticateAndGenerateCode(input: {
 export async function verifyAuthorizationCode(input: {
   code: string
   clientId: string
-}): Promise<{ userId: string; redirectUri: string }> {
+}): Promise<{ userId: string; redirectUri: string; holderDid: string }> {
   const authCode = await prisma.authorizationCode.findUnique({
     where: { code: input.code },
   })
@@ -141,15 +360,46 @@ export async function verifyAuthorizationCode(input: {
     throw new AuthError('Client ID does not match', 400)
   }
 
+  const metadataRecord = await prisma.issuerConfig.findUnique({
+    where: { key: `auth-code-meta:${input.code}` },
+    select: { value: true },
+  })
+
+  if (!metadataRecord?.value) {
+    throw new AuthError('Authorization code metadata not found', 400)
+  }
+
+  let metadata: { holderDid?: string; clientId?: string }
+  try {
+    metadata = JSON.parse(metadataRecord.value)
+  } catch {
+    throw new AuthError('Invalid authorization code metadata', 400)
+  }
+
+  const metadataHolderDid = metadata.holderDid ? normalizeDidForStorage(metadata.holderDid) : ''
+
+  if (!metadataHolderDid) {
+    throw new AuthError('Authorization code is not bound to holder DID', 400)
+  }
+
+  if (metadata.clientId && metadata.clientId !== input.clientId) {
+    throw new AuthError('Client ID metadata mismatch', 400)
+  }
+
   // Mark code as used
   await prisma.authorizationCode.update({
     where: { code: input.code },
     data: { used: true },
   })
 
+  await prisma.issuerConfig.delete({
+    where: { key: `auth-code-meta:${input.code}` },
+  }).catch(() => undefined)
+
   return {
     userId: authCode.userId,
     redirectUri: authCode.redirectUri,
+    holderDid: metadataHolderDid,
   }
 }
 

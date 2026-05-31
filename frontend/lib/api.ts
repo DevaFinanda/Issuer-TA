@@ -1,6 +1,26 @@
 import axios from 'axios';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+const ENV_API_BASE_URL = (process.env.NEXT_PUBLIC_API_URL || '').trim();
+
+function resolveApiBaseUrl(): string {
+  if (typeof window === 'undefined') {
+    return ENV_API_BASE_URL || 'http://localhost:3001';
+  }
+
+  const isLocalHost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+  const apiLooksLocal = ENV_API_BASE_URL.includes('localhost') || ENV_API_BASE_URL.includes('127.0.0.1');
+  const mixedContentRisk = window.location.protocol === 'https:' && ENV_API_BASE_URL.startsWith('http://');
+
+  // In production browser context, prefer same-origin proxy path to avoid
+  // mixed-content/CORS issues when env is not configured correctly.
+  if (!isLocalHost && (!ENV_API_BASE_URL || apiLooksLocal || mixedContentRisk)) {
+    return `${window.location.origin}/api`;
+  }
+
+  return ENV_API_BASE_URL || `${window.location.origin}/api`;
+}
+
+const API_BASE_URL = resolveApiBaseUrl();
 const API_KEY = process.env.NEXT_PUBLIC_API_KEY || 'change-this-in-production';
 
 // Axios instance for admin endpoints (with API key)
@@ -56,13 +76,14 @@ export interface CredentialOfferResponse {
 
 export interface RegisterHolderRequest {
   nik: string;
-  nama: string;
-  tanggalLahir: string;
+  nama?: string;
+  tanggal_lahir?: string;
+  email?: string;
   password: string;
 }
 
 export interface AuthorizeRequest {
-  nik: string;
+  identifier: string;
   password: string;
   client_id: string;
   redirect_uri: string;
@@ -109,6 +130,61 @@ export interface StatsResponse {
   statistics: Record<string, any>;
 }
 
+export interface ManagedCredential {
+  id: string;
+  holderName: string;
+  holderDID: string | null;
+  format: string;
+  status: string;
+  issuedAt: string;
+  validUntil: string;
+}
+
+export interface ManagedCredentialDetail {
+  id: string;
+  holderDID: string | null;
+  holderName: string;
+  nik: string;
+  nama: string;
+  tanggalLahir?: string | null;
+  format: string;
+  status: string;
+  issuerDID: string;
+  issuerName: string;
+  issuedAt: string;
+  validFrom: string;
+  validUntil: string;
+  revokedAt?: string | null;
+  revokedReason?: string | null;
+}
+
+export interface CredentialsListResponse {
+  success: boolean;
+  credentials: ManagedCredential[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
+}
+
+export interface HoldersSummaryItem {
+  id: string;
+  nik: string | null;
+  email: string;
+  nama: string;
+  isActive: boolean;
+  holderDID: string | null;
+  credentialCount: number;
+  lastIssuedAt: string | null;
+}
+
+export interface HoldersSummaryResponse {
+  success: boolean;
+  holders: HoldersSummaryItem[];
+}
+
 // ============================================
 // Admin API (requires API key)
 // ============================================
@@ -138,6 +214,54 @@ export const issuerApi = {
     return response.data;
   },
 
+  /** List credentials (admin) */
+  async getCredentials(params?: { page?: number; limit?: number; status?: string }): Promise<CredentialsListResponse> {
+    const response = await apiClient.get('/api/credentials', { params });
+    return response.data;
+  },
+
+  /** Credential detail (admin) */
+  async getCredentialDetail(id: string): Promise<{ success: boolean; credential: ManagedCredentialDetail }> {
+    const response = await apiClient.get(`/api/credentials/${id}`);
+    return response.data;
+  },
+
+  /** Revoke credential (admin) */
+  async revokeCredential(id: string, reason?: string): Promise<{ success: boolean; message: string }> {
+    const response = await apiClient.post(`/api/credentials/${id}/revoke`, { reason });
+    return response.data;
+  },
+
+  /** Suspend credential (admin) */
+  async suspendCredential(id: string, reason?: string): Promise<{ success: boolean; message: string }> {
+    const response = await apiClient.post(`/api/credentials/${id}/suspend`, { reason });
+    return response.data;
+  },
+
+  /** Extend credential expiration (admin) */
+  async extendCredentialExpiry(id: string, validUntil: string): Promise<{ success: boolean; message: string; validUntil: string }> {
+    const response = await apiClient.post(`/api/credentials/${id}/extend-expiry`, { validUntil });
+    return response.data;
+  },
+
+  /** Delete credential permanently (admin) */
+  async deleteCredential(id: string): Promise<{ success: boolean; message: string }> {
+    const response = await apiClient.delete(`/api/credentials/${id}`);
+    return response.data;
+  },
+
+  /** Holder list and summary (admin) */
+  async getHolders(): Promise<HoldersSummaryResponse> {
+    const response = await apiClient.get('/api/holders');
+    return response.data;
+  },
+
+  /** Delete holder permanently (admin) */
+  async deleteHolder(id: string): Promise<{ success: boolean; message: string }> {
+    const response = await apiClient.delete(`/api/holders/${id}`);
+    return response.data;
+  },
+
   /** Health check */
   async healthCheck(): Promise<HealthCheckResponse> {
     const response = await publicClient.get('/health');
@@ -164,7 +288,7 @@ export const holderApi = {
 
   /** Authorize (login as holder → get auth code) */
   async authorize(data: AuthorizeRequest): Promise<AuthorizeResponse> {
-    const response = await publicClient.post('/authorize', data);
+    const response = await publicClient.post('/oid4vci/authorize', data);
     return response.data;
   },
 
@@ -184,7 +308,7 @@ export const holderApi = {
       {
         format: 'jwt_vc_json',
         credential_definition: {
-          type: ['VerifiableCredential', 'IdentityCredential'],
+          type: ['VerifiableCredential', 'KartuBPJSKesehatan'],
         },
       },
       {

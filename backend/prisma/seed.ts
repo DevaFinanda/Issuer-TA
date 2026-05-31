@@ -110,7 +110,7 @@ async function main() {
   // ============================================
   const configs = [
     { key: 'issuer_name', value: 'Identity Credential Issuer', description: 'Nama Issuer' },
-    { key: 'issuer_did_domain', value: 'localhost:3001', description: 'Domain untuk DID' },
+    { key: 'issuer_did_domain', value: 'issuer.identia.my.id', description: 'Domain untuk DID' },
     { key: 'credential_validity_days', value: '365', description: 'Validitas credential dalam hari' },
     { key: 'credential_format', value: 'jwt_vc_json', description: 'Format credential yang didukung' },
   ]
