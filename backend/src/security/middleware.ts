@@ -14,7 +14,38 @@ import crypto from 'crypto'
 const blacklistedIPs = new Set<string>()
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>()
 const RATE_LIMIT = Number(process.env.RATE_LIMIT_MAX_REQUESTS) || 100
+const RATE_LIMIT_AUTH = Number(process.env.RATE_LIMIT_AUTH_MAX_REQUESTS) || 300
+const RATE_LIMIT_OID4VCI = Number(process.env.RATE_LIMIT_OID4VCI_MAX_REQUESTS) || 200
 const RATE_WINDOW = Number(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000
+
+function getClientIP(req: Request): string {
+  const cfConnectingIp = req.headers['cf-connecting-ip'] as string | undefined
+  if (cfConnectingIp) return cfConnectingIp.split(',')[0].trim()
+
+  const xForwardedFor = req.headers['x-forwarded-for'] as string | undefined
+  if (xForwardedFor) return xForwardedFor.split(',')[0].trim()
+
+  return req.ip || req.socket.remoteAddress || 'unknown'
+}
+
+function getRateLimitBucket(path: string): 'auth' | 'auth-public' | 'oid4vci' | 'default' {
+  // Auth endpoints (stricter limit to prevent brute force)
+  if (path.startsWith('/authorize') || path.startsWith('/oid4vci/authorize')) {
+    return 'auth'
+  }
+
+  // Public login/register (higher limit, user-initiated actions)
+  if (path.startsWith('/login') || path.startsWith('/register') || path.startsWith('/bootstrap')) {
+    return 'auth-public'
+  }
+
+  // OID4VCI credential flow
+  if (path.startsWith('/credential-offer') || path.startsWith('/token') || path.startsWith('/credential')) {
+    return 'oid4vci'
+  }
+
+  return 'default'
+}
 
 // ============================================
 // Input Sanitization — Prevent SQL/XSS Injection
@@ -58,23 +89,39 @@ export function sanitizeInput(req: Request, res: Response, next: NextFunction) {
 // ============================================
 
 export function rateLimiter(req: Request, res: Response, next: NextFunction) {
-  const ip = req.ip || req.socket.remoteAddress || 'unknown'
+  const ip = getClientIP(req)
+  const bucket = getRateLimitBucket(req.path)
+  const key = `${ip}:${bucket}`
+  
+  // Rate limits per bucket
+  let limit: number
+  if (bucket === 'auth') {
+    limit = RATE_LIMIT_AUTH // Stricter for /authorize
+  } else if (bucket === 'auth-public') {
+    limit = RATE_LIMIT * 2 // Higher limit for user-initiated /login, /register
+  } else if (bucket === 'oid4vci') {
+    limit = RATE_LIMIT_OID4VCI
+  } else {
+    limit = RATE_LIMIT
+  }
+  
   const now = Date.now()
 
   if (blacklistedIPs.has(ip)) {
     return res.status(403).json({ error: 'Access denied — IP blacklisted' })
   }
 
-  let rateData = rateLimitMap.get(ip)
+  let rateData = rateLimitMap.get(key)
   if (!rateData || now > rateData.resetTime) {
     rateData = { count: 0, resetTime: now + RATE_WINDOW }
-    rateLimitMap.set(ip, rateData)
+    rateLimitMap.set(key, rateData)
   }
 
   rateData.count++
 
-  if (rateData.count > RATE_LIMIT) {
-    if (rateData.count > RATE_LIMIT * 2) {
+  if (rateData.count > limit) {
+    // Only blacklist abuse from generic endpoints, never auth/OID4VCI buckets.
+    if (bucket === 'default' && rateData.count > limit * 2) {
       blacklistedIPs.add(ip)
       console.error(`🚫 IP blacklisted: ${ip}`)
     }
@@ -84,8 +131,8 @@ export function rateLimiter(req: Request, res: Response, next: NextFunction) {
     })
   }
 
-  res.setHeader('X-RateLimit-Limit', RATE_LIMIT.toString())
-  res.setHeader('X-RateLimit-Remaining', (RATE_LIMIT - rateData.count).toString())
+  res.setHeader('X-RateLimit-Limit', limit.toString())
+  res.setHeader('X-RateLimit-Remaining', Math.max(0, limit - rateData.count).toString())
   res.setHeader('X-RateLimit-Reset', new Date(rateData.resetTime).toISOString())
 
   next()
