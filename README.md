@@ -145,9 +145,3 @@ Issuer-TA/
 ```
 
 ---
-
-## Deployment
-
-Domain produksi: **https://issuer.identia.<sub domain>**
-
----
