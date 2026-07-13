@@ -144,7 +144,9 @@ export class AuthController {
       }
     }
 
-    const frontendAuthorizeUrl = `/authorize${params.toString() ? `?${params.toString()}` : ''}`
+    // Avoid redirect loops when /authorize is proxied to backend by Nginx.
+    // Use a frontend-only alias route that does not match backend auth location patterns.
+    const frontendAuthorizeUrl = `/authorize-web${params.toString() ? `?${params.toString()}` : ''}`
     return res.redirect(302, frontendAuthorizeUrl)
   }
 
